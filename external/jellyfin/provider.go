@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"cliamp/config"
+	"cliamp/internal/source"
 	"cliamp/playlist"
 	"cliamp/provider"
 )
@@ -15,7 +16,11 @@ var (
 	_ provider.AlbumBrowser     = (*Provider)(nil)
 	_ provider.AlbumTrackLoader = (*Provider)(nil)
 	_ provider.PlaybackReporter = (*Provider)(nil)
+	_ source.Matcher            = (*Provider)(nil)
+	_ source.Restorer           = (*Provider)(nil)
 )
+
+const resumeMetaKey = "jellyfin.id"
 
 // Provider implements playlist.Provider for a Jellyfin server.
 // Playlists() returns albums across all music views.
@@ -66,8 +71,16 @@ func (p *Provider) AlbumTracks(albumID string) ([]playlist.Track, error) {
 	return p.Tracks(albumID)
 }
 
+func (p *Provider) RestoreSource(sourceRef source.Ref) ([]playlist.Track, error) {
+	return p.Tracks(sourceRef.ID)
+}
+
+func (p *Provider) ResumeMetaKey() string {
+	return resumeMetaKey
+}
+
 func (p *Provider) CanReportPlayback(track playlist.Track) bool {
-	return track.Meta(provider.MetaJellyfinID) != ""
+	return track.Meta(resumeMetaKey) != ""
 }
 
 func (p *Provider) ReportNowPlaying(track playlist.Track, position time.Duration, canSeek bool) {
@@ -145,7 +158,7 @@ func (p *Provider) Tracks(albumID string) ([]playlist.Track, error) {
 			TrackNumber:  t.TrackNumber,
 			DurationSecs: t.DurationSecs,
 			Stream:       true,
-			ProviderMeta: map[string]string{provider.MetaJellyfinID: t.ID},
+			ProviderMeta: map[string]string{resumeMetaKey: t.ID},
 		})
 	}
 

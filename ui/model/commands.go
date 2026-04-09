@@ -7,6 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"cliamp/internal/playback"
+	"cliamp/internal/session"
+	"cliamp/internal/source"
 	"cliamp/lyrics"
 	"cliamp/player"
 	"cliamp/playlist"
@@ -35,7 +37,21 @@ type SetEQPresetMsg struct {
 	Bands *[10]float64 // nil = use built-in preset bands or keep current
 }
 
-type tracksLoadedMsg []playlist.Track
+type tracksLoadedMsg struct {
+	tracks []playlist.Track
+	err    error
+}
+
+type sourceRestoreTracksMsg struct {
+	result session.RestoreResult
+	token  uint64
+}
+
+type cachedRestoreRefetchMsg struct {
+	source source.Ref
+	tracks []playlist.Track
+	err    error
+}
 
 // feedsLoadedMsg carries tracks resolved from remote feed/M3U URLs,
 // along with the original source URLs so downstream handlers can identify
@@ -135,13 +151,15 @@ func authenticateProviderCmd(auth playlist.Authenticator) tea.Cmd {
 	}
 }
 
-func fetchPlaylistsCmd(prov playlist.Provider) tea.Cmd {
+type providerListsMsg struct {
+	playlists []playlist.PlaylistInfo
+	err       error
+}
+
+func fetchProviderListsCmd(prov playlist.Provider) tea.Cmd {
 	return func() tea.Msg {
 		pls, err := prov.Playlists()
-		if err != nil {
-			return err
-		}
-		return pls
+		return providerListsMsg{playlists: pls, err: err}
 	}
 }
 
@@ -229,16 +247,33 @@ func saveYTDLCmd(pageURL string, saveDir string) tea.Cmd {
 	}
 }
 
+func loadProviderTracks(load func() ([]playlist.Track, error)) ([]playlist.Track, error) {
+	tracks, err := load()
+	if err != nil {
+		return nil, err
+	}
+	return resolveWrapperURLs(tracks), nil
+}
+
 func fetchTracksCmd(prov playlist.Provider, playlistID string) tea.Cmd {
 	return func() tea.Msg {
-		tracks, err := prov.Tracks(playlistID)
-		if err != nil {
-			return err
+		tracks, err := loadProviderTracks(func() ([]playlist.Track, error) {
+			return prov.Tracks(playlistID)
+		})
+		return tracksLoadedMsg{tracks: tracks, err: err}
+	}
+}
+
+func fetchRestoreTracksCmd(planner session.Planner, plan session.RestorePlan, token uint64) tea.Cmd {
+	return func() tea.Msg {
+		result := planner.Restore(plan.State)
+		if result.Err == nil {
+			result.Tracks = resolveWrapperURLs(result.Tracks)
 		}
-		// Resolve PLS/M3U wrapper URLs to actual stream URLs so the
-		// player receives a direct audio stream instead of a playlist file.
-		tracks = resolveWrapperURLs(tracks)
-		return tracksLoadedMsg(tracks)
+		return sourceRestoreTracksMsg{
+			result: result,
+			token:  token,
+		}
 	}
 }
 

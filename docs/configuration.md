@@ -55,9 +55,25 @@ Set which provider to start with:
 provider = "radio"
 ```
 
-Valid values: `radio` (default), `navidrome`, `spotify`, `plex`, `jellyfin`, `yt`, `youtube`, `ytmusic`.
+Valid values: `radio`, `navidrome`, `spotify`, `plex`, `jellyfin`, `yt`, `youtube`, `ytmusic`.
+
+If `provider` is unset, cliamp starts on the last selected provider from `resume.json`. If none is saved, it falls back to the first available provider, which is usually `radio`.
+
+If `resume.json` also contains a resumable session, cliamp restores that playlist or source when possible. Source-backed restores switch to their owning provider automatically.
+
+Resume state is only loaded by the instance that owns `~/.config/cliamp/cliamp.sock`. If another cliamp process already owns that socket, the new process starts without restoring `resume.json`.
 
 You can also override from the CLI: `cliamp --provider jellyfin`.
+
+## Startup Playlist
+
+Start with a named local playlist from `~/.config/cliamp/playlists/`:
+
+```toml
+playlist = "favorites"
+```
+
+You can also override from the CLI: `cliamp --playlist "favorites"`.
 
 ## Custom Radio Stations
 

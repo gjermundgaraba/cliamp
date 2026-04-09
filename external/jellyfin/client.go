@@ -405,7 +405,7 @@ func (c *Client) StreamURL(itemID string) string {
 func (c *Client) ReportNowPlaying(track playlist.Track, position time.Duration, canSeek bool) error {
 	return c.postJSON("/Sessions/Playing", playbackInfo{
 		CanSeek:       canSeek,
-		ItemID:        track.Meta(provider.MetaJellyfinID),
+		ItemID:        track.Meta(resumeMetaKey),
 		IsPaused:      false,
 		IsMuted:       false,
 		PositionTicks: toTicks(position),
@@ -416,7 +416,7 @@ func (c *Client) ReportNowPlaying(track playlist.Track, position time.Duration, 
 func (c *Client) ReportScrobble(track playlist.Track, elapsed time.Duration, canSeek bool) error {
 	progress := playbackInfo{
 		CanSeek:       canSeek,
-		ItemID:        track.Meta(provider.MetaJellyfinID),
+		ItemID:        track.Meta(resumeMetaKey),
 		IsPaused:      false,
 		IsMuted:       false,
 		PositionTicks: toTicks(elapsed),
@@ -426,7 +426,7 @@ func (c *Client) ReportScrobble(track playlist.Track, elapsed time.Duration, can
 		return err
 	}
 	return c.postJSON("/Sessions/Playing/Stopped", playbackStopInfo{
-		ItemID:        track.Meta(provider.MetaJellyfinID),
+		ItemID:        track.Meta(resumeMetaKey),
 		PositionTicks: toTicks(elapsed),
 		Failed:        false,
 	})

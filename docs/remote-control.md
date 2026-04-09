@@ -2,7 +2,7 @@
 
 Control a running cliamp instance from another terminal, a shell script, or an AI coding assistant.
 
-When cliamp starts, it listens on a Unix domain socket at `~/.config/cliamp/cliamp.sock`. CLI subcommands connect to this socket to send playback commands and receive status.
+During startup, cliamp claims a Unix domain socket at `~/.config/cliamp/cliamp.sock`. CLI subcommands connect to this socket to send playback commands and receive status.
 
 ## Playback Commands
 
@@ -75,12 +75,13 @@ Response format:
 ```json
 {"ok": true}
 {"ok": true, "state": "playing", "track": {...}, ...}
+{"ok": false, "error": "cliamp is still starting"}
 {"ok": false, "error": "cliamp is not running"}
 ```
 
 ## Socket Details
 
-- **Path**: `~/.config/cliamp/cliamp.sock` (created on TUI start, removed on shutdown)
+- **Path**: `~/.config/cliamp/cliamp.sock` (claimed during startup, removed on shutdown)
 - **Permissions**: `0600` (owner only)
 - **Stale detection**: A PID file (`cliamp.sock.pid`) tracks the owning process. If cliamp crashes, the next instance detects the stale socket and cleans it up.
 
@@ -104,4 +105,11 @@ If cliamp is not running:
 ```
 $ cliamp status
 cliamp is not running (no socket at /Users/you/.config/cliamp/cliamp.sock)
+```
+
+If cliamp has claimed the socket but has not attached its dispatcher yet:
+
+```
+$ cliamp status
+cliamp is still starting
 ```

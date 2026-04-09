@@ -20,6 +20,8 @@ import (
 	"cliamp/internal/appmeta"
 	"cliamp/internal/playback"
 	"cliamp/internal/resume"
+	"cliamp/internal/session"
+	"cliamp/internal/sessionflow"
 	"cliamp/ipc"
 	"cliamp/luaplugin"
 	"cliamp/mediactl"
@@ -34,6 +36,32 @@ import (
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
 var version string
 
+func defaultRadioTracks() []playlist.Track {
+	return []playlist.Track{
+		{Path: "http://radio.cliamp.stream/lofi/stream", Title: "Lofi Stream", Stream: true, Realtime: true},
+		{Path: "http://radio.cliamp.stream/synthwave/stream", Title: "Synthwave Stream", Stream: true, Realtime: true},
+		{Path: "http://radio.cliamp.stream/edm/stream", Title: "EDM Stream", Stream: true, Realtime: true},
+	}
+}
+
+func startupProviders(entries []model.ProviderEntry) ([]session.RuntimeProvider, []sessionflow.ProviderRef) {
+	runtimeProviders := make([]session.RuntimeProvider, 0, len(entries))
+	providerRefs := make([]sessionflow.ProviderRef, 0, len(entries))
+	for _, entry := range entries {
+		provider := session.RuntimeProvider{
+			Key:      entry.Key,
+			Provider: entry.Provider,
+		}
+		runtimeProviders = append(runtimeProviders, provider)
+		providerRefs = append(providerRefs, sessionflow.ProviderRef{
+			Key:       provider.Key,
+			Available: provider.Provider != nil,
+		})
+	}
+
+	return runtimeProviders, providerRefs
+}
+
 func run(overrides config.Overrides, positional []string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -41,7 +69,14 @@ func run(overrides config.Overrides, positional []string) error {
 	}
 	overrides.Apply(&cfg)
 
-	// Build provider list: Radio is always available, Navidrome and Spotify if configured.
+	sockPath := ipc.DefaultSocketPath()
+	ipcSrv, ipcErr := ipc.ClaimServer(sockPath)
+	if ipcErr != nil {
+		fmt.Fprintf(os.Stderr, "ipc: %v\n", ipcErr)
+	} else {
+		defer ipcSrv.Close()
+	}
+
 	radioProv := radio.New()
 	localProv := local.New()
 
@@ -139,27 +174,41 @@ func run(overrides config.Overrides, positional []string) error {
 		return err
 	}
 
-	defaultProvider := cfg.Provider
-	if defaultProvider == "" {
-		defaultProvider = "radio"
+	hasExplicitInput := len(resolved.Tracks) > 0 || len(resolved.Pending) > 0 || len(positional) > 0
+	runtimeProviders, providerRefs := startupProviders(providers)
+	sessionPlanner := session.NewPlanner(runtimeProviders)
+	resumeSnapshot := session.PersistedSnapshot{}
+	if ipcSrv != nil {
+		resumeSnapshot = resume.Load()
 	}
-
-	defaultRadio := len(positional) == 0 && defaultProvider == "radio"
+	startupPlan := sessionflow.PlanStartup(sessionPlanner, sessionflow.StartupInput{
+		Snapshot:     resumeSnapshot,
+		ProviderRefs: providerRefs,
+		ProviderPrefs: sessionflow.ProviderPrefs{
+			Explicit: cfg.Provider,
+			Selected: resumeSnapshot.LastProviderKey,
+		},
+		HasExplicitInput:   hasExplicitInput,
+		ConfiguredPlaylist: cfg.Playlist,
+		HasLocalProvider:   localProv != nil,
+	})
 
 	pl := playlist.New()
-	if cfg.Playlist != "" && localProv != nil {
-		tracks, err := localProv.Tracks(cfg.Playlist)
+
+	var configuredPlaylistTracks []playlist.Track
+	if startupPlan.Preparation == sessionflow.StartupPreparationConfiguredPlaylist {
+		configuredPlaylistTracks, err = localProv.Tracks(cfg.Playlist)
 		if err != nil {
 			return fmt.Errorf("playlist %q: %w", cfg.Playlist, err)
 		}
-		pl.Add(tracks...)
 		cfg.AutoPlay = true
-	} else if defaultRadio {
-		pl.Add(
-			playlist.Track{Path: "http://radio.cliamp.stream/lofi/stream", Title: "Lofi Stream", Stream: true},
-			playlist.Track{Path: "http://radio.cliamp.stream/synthwave/stream", Title: "Synthwave Stream", Stream: true},
-			playlist.Track{Path: "http://radio.cliamp.stream/edm/stream", Title: "EDM Stream", Stream: true},
-		)
+		if startupPlan.Action != sessionflow.StartupActionRestoreHydratedFromConfiguredPlaylist {
+			pl.Add(configuredPlaylistTracks...)
+		}
+	}
+
+	if startupPlan.Preparation == sessionflow.StartupPreparationDefaultRadio {
+		pl.Add(defaultRadioTracks()...)
 	}
 	pl.Add(resolved.Tracks...)
 
@@ -210,7 +259,7 @@ func run(overrides config.Overrides, positional []string) error {
 		defer luaMgr.Close()
 	}
 
-	m := model.New(p, pl, providers, defaultProvider, localProv, themes, luaMgr, config.SaveFunc{})
+	m := model.New(p, pl, providers, startupPlan.StartupProvider.Index, localProv, sessionPlanner, themes, luaMgr, config.SaveFunc{})
 
 	if luaMgr != nil {
 		luaMgr.SetStateProvider(luaplugin.StateProvider{
@@ -253,7 +302,27 @@ func run(overrides config.Overrides, positional []string) error {
 
 	m.SetSeekStepLarge(cfg.SeekStepLargeDuration())
 	m.SetPendingURLs(resolved.Pending)
-	if len(resolved.Tracks) == 0 && len(resolved.Pending) == 0 && pl.Len() == 0 {
+	m.LoadPersistedSessions(startupPlan.Snapshot.ProviderSessions)
+	if startupPlan.Preparation == sessionflow.StartupPreparationConfiguredPlaylist &&
+		startupPlan.Action == sessionflow.StartupActionNone &&
+		!hasExplicitInput {
+		m.ResumePlaylist(cfg.Playlist, configuredPlaylistTracks)
+	}
+	switch startupPlan.Action {
+	case sessionflow.StartupActionRestoreHydrated:
+		m.SetAutoPlay(true)
+		if err := m.ApplyStartupRestore(startupPlan.Restore, nil); err != nil {
+			return err
+		}
+	case sessionflow.StartupActionRestoreHydratedFromConfiguredPlaylist:
+		m.SetAutoPlay(true)
+		if err := m.ApplyStartupRestore(startupPlan.Restore, configuredPlaylistTracks); err != nil {
+			m.ResumePlaylist(cfg.Playlist, configuredPlaylistTracks)
+		}
+	case sessionflow.StartupActionRestoreDeferred:
+		m.SetAutoPlay(true)
+		m.ScheduleStartupRestore(startupPlan.Restore)
+	case sessionflow.StartupActionOpenProviderBrowser:
 		m.StartInProvider()
 	}
 	if cfg.EQPreset != "" && cfg.EQPreset != "Custom" {
@@ -272,13 +341,10 @@ func run(overrides config.Overrides, positional []string) error {
 		m.SetCompact(true)
 	}
 
-	if !defaultRadio && len(positional) > 0 {
-		if rs := resume.Load(); rs.Path != "" && rs.PositionSec > 0 {
-			m.SetResume(rs.Path, rs.PositionSec)
-		}
-	}
-
 	prog := tea.NewProgram(m)
+	if ipcSrv != nil {
+		ipcSrv.Start(ipc.DispatcherFunc(func(msg interface{}) { prog.Send(msg) }))
+	}
 
 	svc, svcErr := wireMediaCtl(prog)
 	if svcErr == nil && svc != nil {
@@ -304,13 +370,6 @@ func run(overrides config.Overrides, positional []string) error {
 		})
 	}
 
-	ipcSrv, ipcErr := ipc.NewServer(ipc.DefaultSocketPath(), ipc.DispatcherFunc(func(msg interface{}) { prog.Send(msg) }))
-	if ipcErr != nil {
-		fmt.Fprintf(os.Stderr, "ipc: %v\n", ipcErr)
-	} else {
-		defer ipcSrv.Close()
-	}
-
 	finalModel, err := mediactl.Run(prog, svc)
 	if err != nil {
 		return err
@@ -323,8 +382,11 @@ func run(overrides config.Overrides, positional []string) error {
 		}
 		_ = config.Save("theme", fmt.Sprintf("%q", themeName))
 
-		if path, secs, pl := fm.ResumeState(); path != "" && secs > 0 {
-			resume.Save(path, secs, pl)
+		if ipcSrv != nil {
+			resume.Save(session.PersistedSnapshot{
+				LastProviderKey:  fm.ActiveProviderKey(),
+				ProviderSessions: fm.ProviderSessions(),
+			})
 		}
 	}
 

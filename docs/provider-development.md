@@ -30,8 +30,9 @@ tracks for a playlist. That's enough for basic playback.
 
 ## Capability Interfaces (optional)
 
-Implement any combination of these to unlock additional UI features. All
-interfaces are defined in `provider/interfaces.go`.
+Implement any combination of these to unlock additional UI features. Most
+interfaces are defined in `provider/interfaces.go`. Durable resume contracts are
+defined in `internal/source`.
 
 | Interface | What it enables | Methods |
 |---|---|---|
@@ -45,6 +46,8 @@ interfaces are defined in `provider/interfaces.go`.
 | `PlaylistDeleter` | Remove playlists/tracks | `DeletePlaylist(name)`, `RemoveTrack(name, index)` |
 | `CustomStreamer` | Custom URI decode pipeline | `URISchemes()`, `NewStreamer(uri)` |
 | `FavoriteToggler` | Favorite toggling | `ToggleFavorite(id)` |
+| `source.Matcher` | Durable resume identity | `ResumeMetaKey()` |
+| `source.Restorer` | Restore source-backed sessions | `RestoreSource(source.Ref)` |
 | `Closer` | Cleanup on shutdown | `Close()` |
 | `Authenticator` | Interactive sign-in flow | `Authenticate() error` (in `playlist` package) |
 
@@ -110,7 +113,8 @@ When building `playlist.Track` values:
 - **`Stream: true`**: set this for HTTP URLs so the player uses the streaming
   pipeline.
 - **`ProviderMeta`**: attach provider-specific metadata as a string map with
-  namespaced keys. This is used for features like scrobbling:
+  provider-owned namespaced keys. This is used for features like scrobbling and
+  durable resume matching:
 
 ```go
 playlist.Track{
@@ -121,6 +125,12 @@ playlist.Track{
     ProviderMeta: map[string]string{"jellyfin.id": "123"},
 }
 ```
+
+If the provider supports durable session restore, implement
+`source.Matcher` and return the same metadata key from `ResumeMetaKey()`. If it
+can reload tracks for a saved source session, also implement
+`source.Restorer`. The provider owns that contract; do not add shared resume
+metadata constants in central packages.
 
 ### 3. Add configuration
 

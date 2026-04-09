@@ -31,22 +31,19 @@ func (r RepeatMode) String() string {
 
 // Track represents a single audio file or HTTP stream.
 type Track struct {
-	Path         string
-	Title        string
-	Artist       string
-	Album        string
-	Genre        string
-	Year         int
-	TrackNumber  int
-	Stream       bool // true for HTTP/HTTPS URLs
-	Realtime     bool // true for real-time/live streams (e.g. radio)
-	Feed         bool // true for RSS/podcast feed URLs (resolved before playback)
-	DurationSecs int  // known duration in seconds (0 = unknown)
-	Favorite     bool // user-favorited track
-
-	// ProviderMeta holds provider-specific key-value pairs.
-	// Keys are namespaced by provider, e.g. "navidrome.id", "jellyfin.id".
-	ProviderMeta map[string]string
+	Path         string            `json:"path"`
+	Title        string            `json:"title,omitempty"`
+	Artist       string            `json:"artist,omitempty"`
+	Album        string            `json:"album,omitempty"`
+	Genre        string            `json:"genre,omitempty"`
+	Year         int               `json:"year,omitempty"`
+	TrackNumber  int               `json:"track_number,omitempty"`
+	Stream       bool              `json:"stream,omitempty"`
+	Realtime     bool              `json:"realtime,omitempty"`
+	Feed         bool              `json:"feed,omitempty"`
+	DurationSecs int               `json:"duration_secs,omitempty"`
+	Favorite     bool              `json:"favorite,omitempty"`
+	ProviderMeta map[string]string `json:"provider_meta,omitempty"`
 }
 
 // Meta returns the value for a provider-specific metadata key, or "" if unset.
@@ -271,6 +268,14 @@ type Playlist struct {
 	queuedIdx int   // track index currently playing from queue, -1 if none
 }
 
+type PlaybackState struct {
+	CurrentIndex  int
+	CursorIndex   int
+	CurrentQueued bool
+	QueueIndices  []int
+	OrderIndices  []int
+}
+
 // New creates an empty Playlist.
 func New() *Playlist {
 	return &Playlist{queuedIdx: -1}
@@ -354,6 +359,15 @@ func (p *Playlist) Index() int {
 	return p.order[p.pos]
 }
 
+func (p *Playlist) cursorIndex() int {
+	if len(p.order) == 0 {
+		return -1
+	}
+	return p.order[p.pos]
+}
+
+func (p *Playlist) currentFromQueue() bool { return p.queuedIdx >= 0 }
+
 // Next advances to the next track. Returns false if at end with repeat off.
 // Queued tracks are played first before resuming normal order.
 func (p *Playlist) Next() (Track, bool) {
@@ -432,13 +446,15 @@ func (p *Playlist) Prev() (Track, bool) {
 
 // SetIndex sets the current position to the given track index.
 func (p *Playlist) SetIndex(i int) {
-	p.queuedIdx = -1
-	for pos, idx := range p.order {
-		if idx == i {
-			p.pos = pos
-			return
-		}
+	p.setCursor(i)
+}
+
+func (p *Playlist) setQueuedCurrent(i int) bool {
+	if i < 0 || i >= len(p.tracks) {
+		return false
 	}
+	p.queuedIdx = i
+	return true
 }
 
 // Queue adds a track to the play-next queue by its index.
@@ -480,6 +496,89 @@ func (p *Playlist) QueueTracks() []Track {
 		out[i] = p.tracks[idx]
 	}
 	return out
+}
+
+func (p *Playlist) queueIndices() []int {
+	out := make([]int, len(p.queue))
+	copy(out, p.queue)
+	return out
+}
+
+func (p *Playlist) orderIndices() []int {
+	out := make([]int, len(p.order))
+	copy(out, p.order)
+	return out
+}
+
+func (p *Playlist) CapturePlaybackState() PlaybackState {
+	state := PlaybackState{
+		CurrentIndex:  p.Index(),
+		CursorIndex:   p.cursorIndex(),
+		CurrentQueued: p.currentFromQueue(),
+		QueueIndices:  p.queueIndices(),
+		OrderIndices:  p.orderIndices(),
+	}
+	if state.CurrentQueued && state.CurrentIndex < 0 {
+		state.CurrentIndex = state.CursorIndex
+	}
+	if !state.CurrentQueued {
+		state.CursorIndex = state.CurrentIndex
+	}
+	return state
+}
+
+func (p *Playlist) RestorePlaybackState(state PlaybackState) bool {
+	p.queue = nil
+	p.queuedIdx = -1
+
+	if len(state.OrderIndices) > 0 {
+		if !p.setOrder(state.OrderIndices) {
+			return false
+		}
+	}
+
+	if state.CurrentQueued {
+		if !p.setCursor(state.CursorIndex) || !p.setQueuedCurrent(state.CurrentIndex) {
+			return false
+		}
+	} else if !p.setCursor(state.CurrentIndex) {
+		return false
+	}
+
+	for _, idx := range state.QueueIndices {
+		if idx >= 0 && idx < len(p.tracks) {
+			p.queue = append(p.queue, idx)
+		}
+	}
+	return true
+}
+
+func (p *Playlist) setOrder(order []int) bool {
+	if len(order) != len(p.tracks) {
+		return false
+	}
+	seen := make([]bool, len(p.tracks))
+	for _, idx := range order {
+		if idx < 0 || idx >= len(p.tracks) || seen[idx] {
+			return false
+		}
+		seen[idx] = true
+	}
+	p.order = make([]int, len(order))
+	copy(p.order, order)
+	p.pos = 0
+	return true
+}
+
+func (p *Playlist) setCursor(i int) bool {
+	p.queuedIdx = -1
+	for pos, idx := range p.order {
+		if idx == i {
+			p.pos = pos
+			return true
+		}
+	}
+	return false
 }
 
 // ClearQueue removes all entries from the play-next queue.

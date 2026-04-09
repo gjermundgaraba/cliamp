@@ -32,8 +32,15 @@ eq_preset = "Flat"
 # Only used when eq_preset is "Custom" or empty
 eq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
-# Default provider on startup: "radio", "navidrome", "spotify", "plex", "jellyfin", or a YouTube provider
+# Startup provider override: "radio", "navidrome", "spotify", "plex", "jellyfin", or a YouTube provider
+# If unset, cliamp starts on the last selected provider from resume.json, or
+# falls back to the first available provider. It still restores the active
+# resumable session when possible, and source-backed restores switch to their
+# owning provider automatically.
 # provider = "radio"
+
+# Startup local playlist name from ~/.config/cliamp/playlists/<name>.toml
+# playlist = "favorites"
 
 # Compact mode: cap UI width at 80 columns (default: fluid/full-width)
 # compact = true

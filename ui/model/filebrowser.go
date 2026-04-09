@@ -123,7 +123,7 @@ func (m *Model) openFileBrowser() {
 	m.fileBrowser.selected = make(map[string]bool)
 	m.fileBrowser.err = ""
 	m.loadFBDir()
-	m.fileBrowser.visible = true
+	m.pushScreen(screenFileBrowser)
 }
 
 // loadFBDir reads the current directory and populates fbEntries.
@@ -204,11 +204,11 @@ func (m *Model) handleFileBrowserKey(msg tea.KeyPressMsg) tea.Cmd {
 	var cd string
 	switch msg.String() {
 	case "ctrl+c":
-		m.fileBrowser.visible = false
+		m.closeScreen(screenFileBrowser)
 		return m.quit()
 
 	case "esc", "o", "q":
-		m.fileBrowser.visible = false
+		m.closeScreen(screenFileBrowser)
 
 	case "ctrl+x":
 		m.toggleExpandPlaylist()
@@ -361,7 +361,8 @@ func (m *Model) fbConfirm(replace bool) tea.Cmd {
 	for p := range m.fileBrowser.selected {
 		paths = append(paths, p)
 	}
-	m.fileBrowser.visible = false
+	m.cancelPendingRestore()
+	m.closeScreen(screenFileBrowser)
 
 	return func() tea.Msg {
 		r, err := resolve.Args(paths)

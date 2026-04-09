@@ -18,19 +18,7 @@ import (
 
 // quit shuts down the player and signals the TUI to exit.
 func (m *Model) quit() tea.Cmd {
-	// Only save resume for seekable tracks:
-	// - local files (not stream)
-	// - HTTP streams with known duration (podcast MP3s, seek-by-reconnect)
-	// Exclude YTDL (position unreliable) and real-time live streams.
-	if track, _ := m.playlist.Current(); track.Path != "" &&
-		!playlist.IsYTDL(track.Path) && !track.IsLive() &&
-		m.player.IsPlaying() {
-		if secs := int(m.player.Position().Seconds()); secs > 0 {
-			m.exitResume.path = track.Path
-			m.exitResume.secs = secs
-			m.exitResume.playlist = m.loadedPlaylist
-		}
-	}
+	m.exitResume = m.currentSessionState()
 
 	m.flushPendingSpeedSave()
 	m.player.Close()
@@ -183,58 +171,35 @@ func (m *Model) providerToBottom() {
 
 // handleKey processes a single key press and returns an optional command.
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
-	if m.keymap.visible {
+	switch m.activeScreen() {
+	case screenKeymap:
 		return m.handleKeymapKey(msg)
-	}
-
-	// Audio device picker overlay
-	if m.devicePicker.visible {
+	case screenDevicePicker:
 		return m.handleDeviceKey(msg)
-	}
-
-	// Navidrome explore browser overlay
-	if m.navBrowser.visible {
+	case screenNavBrowser:
 		return m.handleNavBrowserKey(msg)
-	}
-
-	// Theme picker overlay — interactive navigation
-	if m.themePicker.visible {
+	case screenThemePicker:
 		return m.handleThemeKey(msg)
-	}
-
-	// Playlist manager overlay (browse, add, remove, delete)
-	if m.plManager.visible {
+	case screenPlaylistManager:
 		return m.handlePlaylistManagerKey(msg)
-	}
-
-	// File browser overlay
-	if m.fileBrowser.visible {
+	case screenFileBrowser:
 		return m.handleFileBrowserKey(msg)
-	}
-
-	// Queue manager overlay
-	if m.queue.visible {
+	case screenQueue:
 		return m.handleQueueKey(msg)
-	}
-
-	// Track info overlay
-	if m.showInfo {
+	case screenInfo:
 		switch msg.String() {
 		case "ctrl+c":
 			return m.quit()
 		case "esc", "i":
-			m.showInfo = false
+			m.closeScreen(screenInfo)
 		}
 		return nil
-	}
-
-	// Lyrics overlay
-	if m.lyrics.visible {
+	case screenLyrics:
 		switch msg.String() {
 		case "ctrl+c":
 			return m.quit()
 		case "esc", "y":
-			m.lyrics.visible = false
+			m.closeScreen(screenLyrics)
 		case "up", "k":
 			if !(m.lyricsSyncable() && m.lyricsHaveTimestamps()) && m.lyrics.scroll > 0 {
 				m.lyrics.scroll--
@@ -251,25 +216,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		}
 		return nil
-	}
-
-	if m.jumping {
+	case screenJump:
 		return m.handleJumpKey(msg)
-	}
-
-	if m.urlInputting {
+	case screenURLInput:
 		return m.handleURLInputKey(msg)
-	}
-
-	if m.search.active {
+	case screenSearch:
 		return m.handleSearchKey(msg)
-	}
-
-	if m.netSearch.active {
+	case screenNetSearch:
 		return m.handleNetSearchKey(msg)
-	}
-
-	if m.spotSearch.visible {
+	case screenSpotSearch:
 		return m.handleSpotSearchKey(msg)
 	}
 
@@ -299,6 +254,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			if len(m.providerLists) > 0 && !m.provLoading {
 				m.provLoading = true
+				m.setPendingProviderPlaylist(m.provCursor)
 				return fetchTracksCmd(m.provider, m.providerLists[m.provCursor].ID)
 			}
 		case "tab":
@@ -378,12 +334,13 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.quit()
 	case "esc", "backspace", "b":
 		if m.fullVis {
-			m.fullVis = false
+			m.setBaseScreen(screenMain)
 			m.vis.Rows = ui.DefaultVisRows
 			m.restorePanelWidth()
 		} else if m.focus == focusPlaylist {
 			// Keep current expanded/collapsed height mode when switching focus.
 			m.focus = focusProvider
+			return m.ensureProviderListsLoaded()
 		}
 
 	case "space":
@@ -452,6 +409,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			if m.playlist.Move(m.plCursor, m.plCursor-1) {
 				m.plCursor--
 				m.adjustScroll()
+				m.clearSourceTracking()
 			}
 		}
 
@@ -460,6 +418,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			if m.playlist.Move(m.plCursor, m.plCursor+1) {
 				m.plCursor++
 				m.adjustScroll()
+				m.clearSourceTracking()
 			}
 		}
 
@@ -604,10 +563,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 
 	case "A":
-		if m.focus == focusPlaylist {
-			m.queue.visible = true
-			m.queue.cursor = 0
-		}
+		m.openQueue()
 
 	case "ctrl+s":
 		return m.saveTrack()
@@ -618,31 +574,13 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.player.ToggleMono()
 
 	case "/":
-		m.search.active = true
-		m.search.query = ""
-		m.search.results = nil
-		m.search.cursor = 0
-		m.prevFocus = m.focus
-		m.focus = focusSearch
+		m.openSearch()
 
 	case "f", "ctrl+f":
-		m.netSearch.active = true
-		m.netSearch.query = ""
-		m.netSearch.soundcloud = msg.String() == "ctrl+f"
-		m.prevFocus = m.focus
-		m.focus = focusNetSearch
+		m.openNetSearch(msg.String() == "ctrl+f")
 
 	case "F":
-		if prov := m.findProviderWith(func(p playlist.Provider) bool {
-			_, ok := p.(provider.Searcher)
-			return ok
-		}); prov != nil {
-			m.spotSearch = spotSearchState{
-				prov:    prov,
-				visible: true,
-				screen:  spotSearchInput,
-			}
-		}
+		m.openSpotSearch()
 
 	case "ctrl+j":
 		m.openJumpMode()
@@ -657,30 +595,16 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.openThemePicker()
 
 	case "i":
-		m.showInfo = true
+		m.openTrackInfo()
 
 	case "y":
-		m.lyrics.visible = !m.lyrics.visible
-		if m.lyrics.visible && !m.lyrics.loading {
-			artist, title := m.lyricsArtistTitle()
-			if artist != "" && title != "" {
-				q := artist + "\n" + title
-				if q != m.lyrics.query {
-					m.lyrics.query = q
-					m.lyrics.loading = true
-					m.lyrics.lines = nil
-					m.lyrics.err = nil
-					return fetchLyricsCmd(artist, title)
-				}
-			}
-		}
+		return m.toggleLyrics()
 
 	case "o":
 		m.openFileBrowser()
 
 	case "u":
-		m.urlInputting = true
-		m.urlInput = ""
+		m.openURLInput()
 
 	case "N":
 		if prov := m.findBrowseProvider(); prov != nil {
@@ -705,14 +629,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 
 	case "V":
-		m.fullVis = !m.fullVis
-		if m.fullVis {
-			m.vis.Rows = max(ui.DefaultVisRows, (m.height-10)*4/5)
-			ui.PanelWidth = max(0, m.width-2*ui.PaddingH)
-		} else {
-			m.vis.Rows = ui.DefaultVisRows
-			m.restorePanelWidth()
-		}
+		m.toggleFullVisualizer()
 
 	case "ctrl+x":
 		if m.focus == focusPlaylist {
@@ -720,12 +637,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 
 	case "d":
-		m.devicePicker.visible = true
-		m.devicePicker.cursor = 0
-		if len(m.devicePicker.devices) == 0 {
-			m.devicePicker.loading = true
-			return listDevicesCmd()
-		}
+		return m.openDevicePicker()
 
 	case "]":
 		m.changeSpeed(0.25)
@@ -734,7 +646,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.changeSpeed(-0.25)
 
 	case "ctrl+k":
-		m.keymap.visible = true
+		m.openKeymap()
 	}
 
 	return nil
@@ -804,13 +716,13 @@ func (m *Model) resetJumpInput() {
 }
 
 func (m *Model) openJumpMode() {
-	m.jumping = true
 	m.resetJumpInput()
+	m.pushScreen(screenJump)
 }
 
 func (m *Model) closeJumpMode() {
-	m.jumping = false
 	m.resetJumpInput()
+	m.closeScreen(screenJump)
 }
 
 // handleJumpKey processes key presses while in jump-time mode.
@@ -871,6 +783,7 @@ func (m *Model) handleProvSearchKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.providerMaybeAdjustScroll()
 			m.provLoading = true
 			m.provSearch.active = false
+			m.setPendingProviderPlaylist(idx)
 			return fetchTracksCmd(m.provider, m.providerLists[idx].ID)
 		}
 	case tea.KeyUp:
@@ -968,50 +881,38 @@ func (m *Model) handlePaste(content string) tea.Cmd {
 		return nil
 	}
 
-	// Keymap overlay search
-	if m.keymap.visible {
+	switch m.activeScreen() {
+	case screenKeymap:
 		m.keymap.search += content
 		m.updateKeymapFilter()
 		return nil
-	}
-
-	// Nav browser search
-	if m.navBrowser.visible && m.navBrowser.mode != navBrowseModeMenu && m.navBrowser.searching {
-		m.navBrowser.search += content
-		m.navBrowser.cursor = 0
-		m.navBrowser.scroll = 0
-		m.navUpdateSearch()
+	case screenNavBrowser:
+		if m.navBrowser.mode != navBrowseModeMenu && m.navBrowser.searching {
+			m.navBrowser.search += content
+			m.navBrowser.cursor = 0
+			m.navBrowser.scroll = 0
+			m.navUpdateSearch()
+		}
 		return nil
-	}
-
-	// Playlist manager new-name input
-	if m.plManager.visible && m.plManager.screen == plMgrScreenNewName {
-		m.plManager.newName += content
+	case screenPlaylistManager:
+		if m.plManager.screen == plMgrScreenNewName {
+			m.plManager.newName += content
+		}
 		return nil
-	}
-
-	if m.jumping {
+	case screenJump:
 		m.jumpInput += content
 		return nil
-	}
-
-	if m.urlInputting {
+	case screenURLInput:
 		m.urlInput += content
 		return nil
-	}
-
-	if m.search.active {
+	case screenSearch:
 		m.search.query += content
 		m.updateSearch()
 		return nil
-	}
-
-	if m.netSearch.active {
+	case screenNetSearch:
 		m.netSearch.query += content
 		return nil
-	}
-
-	if m.spotSearch.visible {
+	case screenSpotSearch:
 		switch m.spotSearch.screen {
 		case spotSearchInput:
 			m.spotSearch.query += content
@@ -1036,13 +937,13 @@ func (m *Model) handleSearchKey(msg tea.KeyPressMsg) tea.Cmd {
 	// Allow opening overlays during search (ctrl combos don't conflict with text input).
 	switch msg.String() {
 	case "ctrl+k":
-		m.keymap.visible = true
+		m.openKeymap()
 		return nil
 	}
 
 	switch msg.Code {
 	case tea.KeyEscape:
-		m.search.active = false
+		m.closeScreen(screenSearch)
 		m.focus = m.prevFocus
 
 	case tea.KeyEnter:
@@ -1055,7 +956,7 @@ func (m *Model) handleSearchKey(msg tea.KeyPressMsg) tea.Cmd {
 			cmd = m.playCurrentTrack()
 			m.notifyPlayback()
 		}
-		m.search.active = false
+		m.closeScreen(screenSearch)
 		m.focus = focusPlaylist
 		return cmd
 
@@ -1102,20 +1003,21 @@ func (m *Model) handleSearchKey(msg tea.KeyPressMsg) tea.Cmd {
 func (m *Model) handleNetSearchKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+k":
-		m.keymap.visible = true
+		m.openKeymap()
 		return nil
 	}
 
 	switch msg.Code {
 	case tea.KeyEscape:
-		m.netSearch.active = false
+		m.closeScreen(screenNetSearch)
 		m.focus = m.prevFocus
 
 	case tea.KeyEnter:
 		var cmd tea.Cmd
-		m.netSearch.active = false
+		m.closeScreen(screenNetSearch)
 		m.focus = m.prevFocus
 		if strings.TrimSpace(m.netSearch.query) != "" {
+			m.cancelPendingRestore()
 			prefix := "ytsearch1:"
 			if m.netSearch.soundcloud {
 				prefix = "scsearch1:"
@@ -1144,11 +1046,12 @@ func (m *Model) handleNetSearchKey(msg tea.KeyPressMsg) tea.Cmd {
 func (m *Model) handleURLInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.Code {
 	case tea.KeyEscape:
-		m.urlInputting = false
+		m.closeScreen(screenURLInput)
 	case tea.KeyEnter:
-		m.urlInputting = false
+		m.closeScreen(screenURLInput)
 		input := strings.TrimSpace(m.urlInput)
 		if input != "" {
+			m.cancelPendingRestore()
 			m.feedLoading = true
 			m.status.Show("Loading URL...", statusTTLLong)
 			return resolveRemoteCmd([]string{input}, true)
@@ -1203,7 +1106,7 @@ func (m *Model) handlePlMgrListKey(msg tea.KeyPressMsg) tea.Cmd {
 	count := len(m.plManager.playlists) + 1 // +1 for "+ New Playlist..."
 	switch msg.String() {
 	case "ctrl+c":
-		m.plManager.visible = false
+		m.closeScreen(screenPlaylistManager)
 		return m.quit()
 	case "up", "k":
 		if m.plManager.cursor > 0 {
@@ -1236,7 +1139,7 @@ func (m *Model) handlePlMgrListKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.plManager.confirmDel = true
 		}
 	case "esc", "p":
-		m.plManager.visible = false
+		m.closeScreen(screenPlaylistManager)
 	}
 	return nil
 }
@@ -1245,7 +1148,7 @@ func (m *Model) handlePlMgrListKey(msg tea.KeyPressMsg) tea.Cmd {
 func (m *Model) handlePlMgrTracksKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+c":
-		m.plManager.visible = false
+		m.closeScreen(screenPlaylistManager)
 		return m.quit()
 	case "up", "k":
 		if m.plManager.cursor > 0 {
@@ -1265,12 +1168,10 @@ func (m *Model) handlePlMgrTracksKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.player.Stop()
 			m.player.ClearPreload()
 			m.resetYTDLBatch()
-			m.playlist.Replace(m.plManager.tracks)
-			m.loadedPlaylist = m.plManager.selPlaylist
-			m.plCursor = 0
+			m.ResumePlaylist(m.plManager.selPlaylist, m.plManager.tracks)
 			m.playlist.SetIndex(0)
 			m.adjustScroll()
-			m.plManager.visible = false
+			m.closeScreen(screenPlaylistManager)
 			m.focus = focusPlaylist
 			cmd := m.playCurrentTrack()
 			m.notifyPlayback()
@@ -1403,10 +1304,10 @@ func (m *Model) handleQueueKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	switch msg.String() {
 	case "ctrl+c":
-		m.queue.visible = false
+		m.closeScreen(screenQueue)
 		return m.quit()
 	case "ctrl+k":
-		m.keymap.visible = true
+		m.openKeymap()
 	case "up", "k":
 		if m.queue.cursor > 0 {
 			m.queue.cursor--
@@ -1440,9 +1341,9 @@ func (m *Model) handleQueueKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "c":
 		m.playlist.ClearQueue()
-		m.queue.visible = false
+		m.closeScreen(screenQueue)
 	case "esc", "A":
-		m.queue.visible = false
+		m.closeScreen(screenQueue)
 	}
 	return nil
 }
@@ -1451,7 +1352,7 @@ func (m *Model) handleQueueKey(msg tea.KeyPressMsg) tea.Cmd {
 func (m *Model) handleDeviceKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+c":
-		m.devicePicker.visible = false
+		m.closeScreen(screenDevicePicker)
 		return m.quit()
 	case "up", "k":
 		if m.devicePicker.cursor > 0 {
@@ -1468,11 +1369,11 @@ func (m *Model) handleDeviceKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		if len(m.devicePicker.devices) > 0 && m.devicePicker.cursor < len(m.devicePicker.devices) {
 			dev := m.devicePicker.devices[m.devicePicker.cursor]
-			m.devicePicker.visible = false
+			m.closeScreen(screenDevicePicker)
 			return switchDeviceCmd(dev.Name)
 		}
 	case "esc", "d":
-		m.devicePicker.visible = false
+		m.closeScreen(screenDevicePicker)
 	}
 	return nil
 }

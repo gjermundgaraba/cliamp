@@ -5,9 +5,48 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"cliamp/internal/sessionflow"
+	"cliamp/internal/source"
 	"cliamp/playlist"
 	"cliamp/provider"
 )
+
+func (m *Model) providerKeyFor(prov playlist.Provider) string {
+	if prov == m.provider {
+		return m.currentProviderKey()
+	}
+	for _, pe := range m.providers {
+		if pe.Provider == prov {
+			return pe.Key
+		}
+	}
+	return ""
+}
+
+func (m *Model) currentProviderKey() string {
+	if m.activeProviderKey != "" || m.provider == nil {
+		return m.activeProviderKey
+	}
+	for _, pe := range m.providers {
+		if pe.Provider == m.provider {
+			return pe.Key
+		}
+	}
+	return ""
+}
+
+func (m *Model) setPendingProviderPlaylist(idx int) {
+	m.cancelPendingRestore()
+	sourceID := m.providerLists[idx].SourceID
+	if sourceID == "" {
+		sourceID = m.providerLists[idx].ID
+	}
+	m.pendingSource = source.Ref{
+		ProviderKey: m.currentProviderKey(),
+		Kind:        source.Playlist,
+		ID:          sourceID,
+	}
+}
 
 // resetProviderNav resets provider navigation and search state to the top.
 func (m *Model) resetProviderNav() {
@@ -29,28 +68,98 @@ func (m *Model) StartInProvider() {
 	}
 }
 
+func (m *Model) providerLoadCmd() tea.Cmd {
+	if m.restore.pending() {
+		if m.currentProviderKey() == m.restore.plan.State.Source.ProviderKey {
+			return fetchRestoreTracksCmd(
+				m.sessionPlanner,
+				m.restore.plan,
+				m.restore.token,
+			)
+		}
+		m.restore = pendingRestore{token: m.restore.token}
+	}
+	return fetchProviderListsCmd(m.provider)
+}
+
+func (m *Model) ensureProviderListsLoaded() tea.Cmd {
+	if m.provider == nil || m.provLoading || m.providerLists != nil {
+		return nil
+	}
+	m.provLoading = true
+	return fetchProviderListsCmd(m.provider)
+}
+
 // switchProvider sets the active provider by pill index and fetches its playlists.
 func (m *Model) switchProvider(idx int) tea.Cmd {
 	if idx < 0 || idx >= len(m.providers) {
 		return nil
 	}
+
+	targetKey := m.providers[idx].Key
+	currentProviderKey := m.currentProviderKey()
+	plan := sessionflow.PlanProviderSwitch(m.sessionPlanner, sessionflow.ProviderSwitchInput{
+		TargetKey:          targetKey,
+		CurrentProviderKey: currentProviderKey,
+		CurrentOwnerKey:    m.currentSessionOwnerKey(),
+		Sessions:           m.providerSessions,
+	})
+	if !plan.SelectingCurrent {
+		m.captureCurrentProviderState()
+	}
+
+	m.cancelPendingRestore()
+	m.pendingSource = source.Ref{}
+
 	m.provPillIdx = idx
 	m.provider = m.providers[idx].Provider
-	m.providerLists = nil
+	m.activeProviderKey = targetKey
 	m.provSignIn = false
 	m.catalogBatch = catalogBatchState{}
+
+	if !plan.SelectingCurrent {
+		switch plan.Action {
+		case sessionflow.ProviderSwitchRestoreHydrated:
+			m.providerLists = nil
+			m.provLoading = false
+			cmd := m.applyRestoredTracks(plan.Restore.State, plan.Restore.Tracks)
+			return tea.Batch(cmd, m.backgroundRefetchCmd(plan.BackgroundRefetchSource))
+		case sessionflow.ProviderSwitchRestoreDeferred:
+			m.restore = pendingRestore{
+				plan:  plan.Restore,
+				token: m.restore.token + 1,
+			}
+		}
+	}
+
+	m.providerLists = nil
 	m.resetProviderNav()
 	m.focus = focusProvider
-	return fetchPlaylistsCmd(m.provider)
+	return m.providerLoadCmd()
+}
+
+func (m *Model) backgroundRefetchCmd(sourceRef source.Ref) tea.Cmd {
+	prov := m.sessionPlanner.Provider(sourceRef.ProviderKey)
+	if prov == nil {
+		return nil
+	}
+	sr, ok := prov.(source.Restorer)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		tracks, err := loadProviderTracks(func() ([]playlist.Track, error) {
+			return sr.RestoreSource(sourceRef)
+		})
+		return cachedRestoreRefetchMsg{source: sourceRef, tracks: tracks, err: err}
+	}
 }
 
 // switchToProvider finds a provider by config key and switches to it.
 // Returns nil if the provider is not configured.
 func (m *Model) switchToProvider(key string) tea.Cmd {
-	for i, pe := range m.providers {
-		if pe.Key == key {
-			return m.switchProvider(i)
-		}
+	if idx, ok := m.providerIndexByKey[key]; ok {
+		return m.switchProvider(idx)
 	}
 	return nil
 }
@@ -75,7 +184,6 @@ func (m *Model) findBrowseProvider() playlist.Provider {
 
 func (m *Model) openNavBrowserWith(prov playlist.Provider) {
 	m.navBrowser.prov = prov
-	m.navBrowser.visible = true
 	m.navBrowser.mode = navBrowseModeMenu
 	m.navBrowser.screen = navBrowseScreenList
 	m.navBrowser.cursor = 0
@@ -96,6 +204,7 @@ func (m *Model) openNavBrowserWith(prov playlist.Provider) {
 	} else {
 		m.navBrowser.sortType = ""
 	}
+	m.pushScreen(screenNavBrowser)
 }
 
 // navUpdateSearch rebuilds navSearchIdx from the current navSearch query

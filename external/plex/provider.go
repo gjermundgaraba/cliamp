@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"cliamp/config"
+	"cliamp/internal/source"
 	"cliamp/playlist"
 	"cliamp/provider"
 )
@@ -14,6 +15,7 @@ import (
 var (
 	_ provider.Searcher         = (*Provider)(nil)
 	_ provider.AlbumTrackLoader = (*Provider)(nil)
+	_ source.Restorer           = (*Provider)(nil)
 )
 
 // Provider implements playlist.Provider for a Plex Media Server.
@@ -158,4 +160,8 @@ func (p *Provider) convertTracks(plexTracks []Track, limit int) []playlist.Track
 // Implements provider.AlbumTrackLoader.
 func (p *Provider) AlbumTracks(albumID string) ([]playlist.Track, error) {
 	return p.Tracks(albumID)
+}
+
+func (p *Provider) RestoreSource(sourceRef source.Ref) ([]playlist.Track, error) {
+	return p.Tracks(sourceRef.ID)
 }

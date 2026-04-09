@@ -26,14 +26,13 @@ type Dispatcher interface {
 type Server struct {
 	listener net.Listener
 	sockPath string
+	mu       sync.RWMutex
 	disp     Dispatcher
 	done     chan struct{}
 	wg       sync.WaitGroup
 }
 
-// NewServer creates and starts the IPC server. It cleans up stale sockets
-// before binding. The socket is created with 0600 permissions (owner only).
-func NewServer(sockPath string, disp Dispatcher) (*Server, error) {
+func ClaimServer(sockPath string) (*Server, error) {
 	if err := cleanStaleSocket(sockPath); err != nil {
 		return nil, err
 	}
@@ -66,13 +65,18 @@ func NewServer(sockPath string, disp Dispatcher) (*Server, error) {
 	s := &Server{
 		listener: ln,
 		sockPath: sockPath,
-		disp:     disp,
 		done:     make(chan struct{}),
 	}
 
 	s.wg.Add(1)
 	go s.acceptLoop()
 	return s, nil
+}
+
+func (s *Server) Start(disp Dispatcher) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.disp = disp
 }
 
 // Close shuts down the server, removes socket and PID file.
@@ -134,37 +138,44 @@ func (s *Server) handleConn(conn net.Conn) {
 
 // dispatch handles a single parsed request.
 func (s *Server) dispatch(req Request) Response {
+	s.mu.RLock()
+	disp := s.disp
+	s.mu.RUnlock()
+	if disp == nil {
+		return Response{OK: false, Error: "cliamp is still starting"}
+	}
+
 	switch strings.ToLower(req.Cmd) {
 	case "play":
-		s.disp.Send(PlayMsg{})
+		disp.Send(PlayMsg{})
 		return Response{OK: true}
 
 	case "pause":
-		s.disp.Send(PauseMsg{})
+		disp.Send(PauseMsg{})
 		return Response{OK: true}
 
 	case "toggle":
-		s.disp.Send(playback.PlayPauseMsg{})
+		disp.Send(playback.PlayPauseMsg{})
 		return Response{OK: true}
 
 	case "stop":
-		s.disp.Send(playback.StopMsg{})
+		disp.Send(playback.StopMsg{})
 		return Response{OK: true}
 
 	case "next":
-		s.disp.Send(playback.NextMsg{})
+		disp.Send(playback.NextMsg{})
 		return Response{OK: true}
 
 	case "prev":
-		s.disp.Send(playback.PrevMsg{})
+		disp.Send(playback.PrevMsg{})
 		return Response{OK: true}
 
 	case "volume":
-		s.disp.Send(VolumeMsg{DB: req.Value})
+		disp.Send(VolumeMsg{DB: req.Value})
 		return Response{OK: true}
 
 	case "seek":
-		s.disp.Send(SeekMsg{Offset: time.Duration(req.Value * float64(time.Second))})
+		disp.Send(SeekMsg{Offset: time.Duration(req.Value * float64(time.Second))})
 		return Response{OK: true}
 
 	case "load":
@@ -172,7 +183,7 @@ func (s *Server) dispatch(req Request) Response {
 			return Response{OK: false, Error: "load requires a playlist name"}
 		}
 		reply := make(chan Response, 1)
-		s.disp.Send(LoadMsg{Playlist: req.Playlist, Reply: reply})
+		disp.Send(LoadMsg{Playlist: req.Playlist, Reply: reply})
 		select {
 		case resp := <-reply:
 			return resp
@@ -186,7 +197,7 @@ func (s *Server) dispatch(req Request) Response {
 		if req.Path == "" {
 			return Response{OK: false, Error: "queue requires a path"}
 		}
-		s.disp.Send(QueueMsg{Path: req.Path})
+		disp.Send(QueueMsg{Path: req.Path})
 		return Response{OK: true}
 
 	case "theme":
@@ -194,7 +205,7 @@ func (s *Server) dispatch(req Request) Response {
 			return Response{OK: false, Error: "theme requires a name"}
 		}
 		reply := make(chan Response, 1)
-		s.disp.Send(ThemeMsg{Name: req.Name, Reply: reply})
+		disp.Send(ThemeMsg{Name: req.Name, Reply: reply})
 		select {
 		case resp := <-reply:
 			return resp
@@ -209,7 +220,7 @@ func (s *Server) dispatch(req Request) Response {
 			return Response{OK: false, Error: "vis requires a mode name"}
 		}
 		reply := make(chan Response, 1)
-		s.disp.Send(VisMsg{Name: req.Name, Reply: reply})
+		disp.Send(VisMsg{Name: req.Name, Reply: reply})
 		select {
 		case resp := <-reply:
 			return resp
@@ -221,17 +232,17 @@ func (s *Server) dispatch(req Request) Response {
 
 	case "shuffle":
 		reply := make(chan Response, 1)
-		s.disp.Send(ShuffleMsg{Name: req.Name, Reply: reply})
+		disp.Send(ShuffleMsg{Name: req.Name, Reply: reply})
 		return waitReply(reply, s.done)
 
 	case "repeat":
 		reply := make(chan Response, 1)
-		s.disp.Send(RepeatMsg{Name: req.Name, Reply: reply})
+		disp.Send(RepeatMsg{Name: req.Name, Reply: reply})
 		return waitReply(reply, s.done)
 
 	case "mono":
 		reply := make(chan Response, 1)
-		s.disp.Send(MonoMsg{Name: req.Name, Reply: reply})
+		disp.Send(MonoMsg{Name: req.Name, Reply: reply})
 		return waitReply(reply, s.done)
 
 	case "speed":
@@ -239,12 +250,12 @@ func (s *Server) dispatch(req Request) Response {
 			return Response{OK: false, Error: "speed must be positive"}
 		}
 		reply := make(chan Response, 1)
-		s.disp.Send(SpeedMsg{Speed: req.Value, Reply: reply})
+		disp.Send(SpeedMsg{Speed: req.Value, Reply: reply})
 		return waitReply(reply, s.done)
 
 	case "eq":
 		reply := make(chan Response, 1)
-		s.disp.Send(EQMsg{Name: req.Name, Band: req.Band, Value: req.Value, Reply: reply})
+		disp.Send(EQMsg{Name: req.Name, Band: req.Band, Value: req.Value, Reply: reply})
 		return waitReply(reply, s.done)
 
 	case "device":
@@ -252,11 +263,11 @@ func (s *Server) dispatch(req Request) Response {
 			return Response{OK: false, Error: "device requires a name (or 'list')"}
 		}
 		reply := make(chan Response, 1)
-		s.disp.Send(DeviceMsg{Name: req.Name, Reply: reply})
+		disp.Send(DeviceMsg{Name: req.Name, Reply: reply})
 		return waitReply(reply, s.done)
 
 	case "status":
-		return s.handleStatus()
+		return s.handleStatus(disp)
 
 	default:
 		return Response{OK: false, Error: "unknown command: " + req.Cmd}
@@ -277,9 +288,9 @@ func waitReply(reply chan Response, done chan struct{}) Response {
 
 // handleStatus sends a StatusRequestMsg to the TUI and waits for a response
 // with a timeout.
-func (s *Server) handleStatus() Response {
+func (s *Server) handleStatus(disp Dispatcher) Response {
 	reply := make(chan Response, 1)
-	s.disp.Send(StatusRequestMsg{Reply: reply})
+	disp.Send(StatusRequestMsg{Reply: reply})
 
 	select {
 	case resp := <-reply:

@@ -9,7 +9,6 @@ import (
 
 	"cliamp/config"
 	"cliamp/playlist"
-	"cliamp/provider"
 )
 
 // subsonicHandler serves fake Subsonic API responses for testing.
@@ -214,7 +213,7 @@ func TestTracks(t *testing.T) {
 	if !tr.Stream {
 		t.Error("Stream = false, want true")
 	}
-	if got := tr.Meta(provider.MetaNavidromeID); got != "song-1" {
+	if got := tr.Meta(resumeMetaKey); got != "song-1" {
 		t.Errorf("Meta(NavidromeID) = %q, want %q", got, "song-1")
 	}
 	if !strings.Contains(tr.Path, "/rest/stream") {
@@ -558,7 +557,7 @@ func TestCheckSubsonicError(t *testing.T) {
 func trackWithNavidromeMeta(id string) playlist.Track {
 	meta := map[string]string{}
 	if id != "" {
-		meta[provider.MetaNavidromeID] = id
+		meta[resumeMetaKey] = id
 	}
 	return playlist.Track{ProviderMeta: meta}
 }

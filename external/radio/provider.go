@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"sync"
 
 	"cliamp/internal/appdir"
+	"cliamp/internal/source"
 	"cliamp/internal/tomlutil"
 	"cliamp/playlist"
 	"cliamp/provider"
@@ -26,10 +28,12 @@ var (
 	_ provider.CatalogLoader   = (*Provider)(nil)
 	_ provider.CatalogSearcher = (*Provider)(nil)
 	_ provider.SectionedList   = (*Provider)(nil)
+	_ source.Restorer          = (*Provider)(nil)
 )
 
 const builtinName = "cliamp radio"
 const builtinURL = "https://radio.cliamp.stream/streams.m3u"
+const sourceURLPrefix = "u:"
 
 // Provider serves radio stations as single-track playlists.
 // It combines local stations, user favorites, and catalog stations
@@ -89,16 +93,18 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 	// Local stations.
 	for i, s := range p.stations {
 		out = append(out, playlist.PlaylistInfo{
-			ID:   fmt.Sprintf("l:%d", i),
-			Name: s.name,
+			ID:       fmt.Sprintf("l:%d", i),
+			SourceID: sourceIDForURL(s.url),
+			Name:     s.name,
 		})
 	}
 
 	// Favorites.
 	for i, s := range p.favorites.Stations() {
 		out = append(out, playlist.PlaylistInfo{
-			ID:   fmt.Sprintf("f:%d", i),
-			Name: "★ " + formatCatalogName(s),
+			ID:       fmt.Sprintf("f:%d", i),
+			SourceID: sourceIDForURL(s.URL),
+			Name:     "★ " + formatCatalogName(s),
 		})
 	}
 
@@ -117,8 +123,9 @@ func (p *Provider) catalogEntry(prefix string, idx int, s CatalogStation) playli
 		name = "★ " + name
 	}
 	return playlist.PlaylistInfo{
-		ID:   fmt.Sprintf("%s:%d", prefix, idx),
-		Name: name,
+		ID:       fmt.Sprintf("%s:%d", prefix, idx),
+		SourceID: sourceIDForURL(s.URL),
+		Name:     name,
 	}
 }
 
@@ -126,6 +133,15 @@ func (p *Provider) catalogEntry(prefix string, idx int, s CatalogStation) playli
 func (p *Provider) Tracks(id string) ([]playlist.Track, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	if stationURL, ok, err := parseURLSourceID(id); ok {
+		if err != nil {
+			return nil, err
+		}
+		return []playlist.Track{{
+			Path: stationURL, Title: p.stationTitle(stationURL), Stream: true, Realtime: true,
+		}}, nil
+	}
 
 	prefix, idx, err := parseStationID(id)
 	if err != nil {
@@ -162,6 +178,36 @@ func (p *Provider) Tracks(id string) ([]playlist.Track, error) {
 	return []playlist.Track{{
 		Path: url, Title: title, Stream: true, Realtime: true,
 	}}, nil
+}
+
+func (p *Provider) RestoreSource(sourceRef source.Ref) ([]playlist.Track, error) {
+	if _, ok, err := parseURLSourceID(sourceRef.ID); ok || err != nil {
+		return p.Tracks(sourceRef.ID)
+	}
+	prefix, idx, err := parseStationID(sourceRef.ID)
+	if err != nil {
+		return nil, err
+	}
+	if prefix == "c" {
+		p.loadCatalogUpTo(idx)
+	}
+	return p.Tracks(sourceRef.ID)
+}
+
+func (p *Provider) loadCatalogUpTo(idx int) {
+	for {
+		p.mu.Lock()
+		have := len(p.catalog)
+		p.mu.Unlock()
+		if have > idx {
+			return
+		}
+		stations, err := TopStationsOffset(have, 100)
+		if err != nil || len(stations) == 0 {
+			return
+		}
+		p.AppendCatalog(stations)
+	}
 }
 
 // AppendCatalog adds catalog stations fetched from the Radio Browser API.
@@ -309,6 +355,52 @@ func formatCatalogName(s CatalogStation) string {
 		name += " · " + s.Country
 	}
 	return name
+}
+
+func sourceIDForURL(raw string) string {
+	return sourceURLPrefix + url.QueryEscape(raw)
+}
+
+func parseURLSourceID(id string) (string, bool, error) {
+	encoded, ok := strings.CutPrefix(id, sourceURLPrefix)
+	if !ok {
+		return "", false, nil
+	}
+	raw, err := url.QueryUnescape(encoded)
+	if err != nil || raw == "" {
+		return "", true, errors.New("invalid URL source ID")
+	}
+	return raw, true, nil
+}
+
+func (p *Provider) stationTitle(rawURL string) string {
+	for _, s := range p.stations {
+		if s.url == rawURL {
+			return s.name
+		}
+	}
+	if p.favorites != nil {
+		for _, s := range p.favorites.Stations() {
+			if s.URL == rawURL {
+				return s.Name
+			}
+		}
+	}
+	for _, s := range p.catalog {
+		if s.URL == rawURL {
+			return s.Name
+		}
+	}
+	for _, s := range p.searchResults {
+		if s.URL == rawURL {
+			return s.Name
+		}
+	}
+	u, err := url.Parse(rawURL)
+	if err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	return rawURL
 }
 
 // loadStations parses a TOML file with [[station]] sections.

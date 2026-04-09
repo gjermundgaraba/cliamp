@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"cliamp/internal/playback"
+	"cliamp/internal/session"
+	"cliamp/internal/source"
 	"cliamp/luaplugin"
 	"cliamp/player"
 	"cliamp/playlist"
@@ -141,6 +143,8 @@ type Model struct {
 	// UI navigation
 	focus           focusArea
 	prevFocus       focusArea // focus to restore on cancel (search, net search)
+	screenBase      topLevelScreen
+	screenStack     []topLevelScreen
 	eqCursor        int       // selected EQ band (0-9)
 	plCursor        int       // selected playlist item
 	plScroll        int       // scroll offset for playlist view
@@ -153,17 +157,19 @@ type Model struct {
 	height          int
 
 	// Provider state
-	provider      playlist.Provider
-	localProvider playlist.Provider // local playlist provider for file-based playlist management (always available)
-	providerLists []playlist.PlaylistInfo
-	provCursor    int
-	provScroll    int
-	provLoading   bool
-	provSignIn    bool            // true when provider needs interactive sign-in
-	providers     []ProviderEntry // all available providers
-	provPillIdx   int             // selected pill index
-	eqPresetIdx   int             // -1 = custom, 0+ = index into eqPresets
-	eqCustomLabel string          // non-empty = plugin-defined preset label (shown instead of "Custom")
+	provider           playlist.Provider
+	activeProviderKey  string
+	localProvider      playlist.Provider // local playlist provider for file-based playlist management (always available)
+	providerIndexByKey map[string]int
+	providerLists      []playlist.PlaylistInfo
+	provCursor         int
+	provScroll         int
+	provLoading        bool
+	provSignIn         bool            // true when provider needs interactive sign-in
+	providers          []ProviderEntry // all available providers
+	provPillIdx        int             // selected pill index; -1 when no provider is selected
+	eqPresetIdx        int             // -1 = custom, 0+ = index into eqPresets
+	eqCustomLabel      string          // non-empty = plugin-defined preset label (shown instead of "Custom")
 
 	// Overlay / feature state (see state.go for struct definitions)
 	search         searchState
@@ -213,13 +219,19 @@ type Model struct {
 
 	loadedPlaylist string // name of the currently loaded local playlist (for resume)
 
-	// exitResume holds the playback state captured just before player.Close()
-	// so ResumeState() can read it after the player is shut down.
-	exitResume struct {
-		path     string
-		secs     int
-		playlist string
-	}
+	exitResume session.State
+
+	providerSessions map[string]session.HydratedState
+
+	sessionPlanner session.Planner
+
+	sessionOwnerKey string
+
+	source source.Ref
+
+	pendingSource source.Ref
+
+	restore pendingRestore
 
 	// preloading is true while a preloadStreamCmd goroutine is in-flight.
 	preloading bool
@@ -257,40 +269,13 @@ type Model struct {
 }
 
 func (m Model) activeScreen() topLevelScreen {
-	switch {
-	case m.keymap.visible:
-		return screenKeymap
-	case m.themePicker.visible:
-		return screenThemePicker
-	case m.devicePicker.visible:
-		return screenDevicePicker
-	case m.fileBrowser.visible:
-		return screenFileBrowser
-	case m.navBrowser.visible:
-		return screenNavBrowser
-	case m.plManager.visible:
-		return screenPlaylistManager
-	case m.spotSearch.visible:
-		return screenSpotSearch
-	case m.queue.visible:
-		return screenQueue
-	case m.showInfo:
-		return screenInfo
-	case m.search.active:
-		return screenSearch
-	case m.netSearch.active:
-		return screenNetSearch
-	case m.urlInputting:
-		return screenURLInput
-	case m.lyrics.visible:
-		return screenLyrics
-	case m.jumping:
-		return screenJump
-	case m.fullVis:
-		return screenFullVisualizer
-	default:
-		return screenMain
+	if len(m.screenStack) > 0 {
+		return m.screenStack[len(m.screenStack)-1]
 	}
+	if m.screenBase == screenFullVisualizer {
+		return screenFullVisualizer
+	}
+	return screenMain
 }
 
 func (m Model) isOverlayActive() bool {

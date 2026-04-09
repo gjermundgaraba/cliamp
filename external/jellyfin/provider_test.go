@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"cliamp/playlist"
-	"cliamp/provider"
 )
 
 func TestProviderName(t *testing.T) {
@@ -78,17 +77,17 @@ func TestProviderTracks(t *testing.T) {
 	if tr.Title != "So What" || tr.Artist != "Miles Davis" || tr.Album != "Kind of Blue" || tr.TrackNumber != 1 || !tr.Stream {
 		t.Fatalf("track = %+v", tr)
 	}
-	if got := tr.Meta(provider.MetaJellyfinID); got != "track-1" {
+	if got := tr.Meta(resumeMetaKey); got != "track-1" {
 		t.Fatalf("track meta jellyfin id = %q, want track-1", got)
 	}
 }
 
 func TestProviderCanReportPlayback(t *testing.T) {
 	p := newProvider(NewClient("https://jf.example.com", "tok", "user-1", "", ""))
-	if !p.CanReportPlayback(trackWithMeta(provider.MetaJellyfinID, "track-1")) {
+	if !p.CanReportPlayback(trackWithMeta(resumeMetaKey, "track-1")) {
 		t.Fatal("CanReportPlayback() = false, want true")
 	}
-	if p.CanReportPlayback(trackWithMeta(provider.MetaNavidromeID, "nav-1")) {
+	if p.CanReportPlayback(trackWithMeta("navidrome.id", "nav-1")) {
 		t.Fatal("CanReportPlayback() = true for non-Jellyfin track")
 	}
 }

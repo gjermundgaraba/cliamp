@@ -151,9 +151,7 @@ func TestViewKeepsOverlayLayoutUnchanged(t *testing.T) {
 	m := Model{
 		width:  80,
 		height: 22,
-		keymap: keymapOverlay{
-			visible: true,
-		},
+		screenStack: []topLevelScreen{screenKeymap},
 	}
 
 	want := m.renderKeymapOverlay()
@@ -174,12 +172,12 @@ func TestFullVisualizerViewFitsTerminalWidth(t *testing.T) {
 	sharedPlayer.Stop()
 
 	m := Model{
-		player:   sharedPlayer,
-		playlist: playlist.New(),
-		vis:      ui.NewVisualizer(float64(sharedPlayer.SampleRate())),
-		width:    80,
-		height:   24,
-		fullVis:  true,
+		player:     sharedPlayer,
+		playlist:   playlist.New(),
+		vis:        ui.NewVisualizer(float64(sharedPlayer.SampleRate())),
+		width:      80,
+		height:     24,
+		screenBase: screenFullVisualizer,
 	}
 	m.vis.Mode = ui.VisNone
 

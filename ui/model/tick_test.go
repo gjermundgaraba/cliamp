@@ -118,10 +118,8 @@ func TestRefreshVisualizerIfPendingConsumesOneShotRequest(t *testing.T) {
 
 func TestLyricsScreenHidesVisualizerTicks(t *testing.T) {
 	m := Model{
-		vis: ui.NewVisualizer(44100),
-		lyrics: lyricsState{
-			visible: true,
-		},
+		vis:         ui.NewVisualizer(44100),
+		screenStack: []topLevelScreen{screenLyrics},
 	}
 
 	if got := m.activeScreen(); got != screenLyrics {
@@ -147,10 +145,8 @@ func TestLyricsScreenHidesVisualizerTicks(t *testing.T) {
 
 func TestUpdateRequestsVisualizerRefreshWhenOverlayCloses(t *testing.T) {
 	m := Model{
-		vis: ui.NewVisualizer(44100),
-		keymap: keymapOverlay{
-			visible: true,
-		},
+		vis:         ui.NewVisualizer(44100),
+		screenStack: []topLevelScreen{screenKeymap},
 	}
 
 	nextModel, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -172,10 +168,8 @@ func TestUpdateRequestsVisualizerRefreshWhenOverlayCloses(t *testing.T) {
 
 func TestUpdateRequestsVisualizerRefreshWhenLyricsClose(t *testing.T) {
 	m := Model{
-		vis: ui.NewVisualizer(44100),
-		lyrics: lyricsState{
-			visible: true,
-		},
+		vis:         ui.NewVisualizer(44100),
+		screenStack: []topLevelScreen{screenLyrics},
 	}
 
 	nextModel, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})

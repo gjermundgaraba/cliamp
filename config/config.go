@@ -137,7 +137,7 @@ type Config struct {
 	Speed           float64                      // playback speed ratio: 0.25–2.0 (default 1.0)
 	AutoPlay        bool                         // start playback automatically on launch (radio streams, CLI tracks)
 	SeekStepLarge   int                          // seconds for Shift+Left/Right seek jumps
-	Provider        string                       // default provider: "radio", "navidrome", "spotify", "plex", "jellyfin", "ytmusic" (default "radio")
+	Provider        string                       // startup provider override
 	Theme           string                       // theme name, or "" for ANSI default
 	Visualizer      string                       // visualizer mode name, or "" for default (Bars)
 	SampleRate      int                          // output sample rate: 22050, 44100, 48000, 96000, 192000
@@ -358,6 +358,8 @@ func Load() (Config, error) {
 				cfg.Compact = val == "true"
 			case "audio_device":
 				cfg.AudioDevice = strings.Trim(val, `"'`)
+			case "playlist":
+				cfg.Playlist = strings.Trim(val, `"'`)
 			case "padding_horizontal":
 				if v, err := strconv.Atoi(val); err == nil {
 					cfg.PaddingH = v

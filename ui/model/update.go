@@ -9,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"cliamp/internal/playback"
+	"cliamp/internal/session"
+	"cliamp/internal/source"
 	"cliamp/ipc"
 	"cliamp/player"
 	"cliamp/playlist"
@@ -16,6 +18,17 @@ import (
 	"cliamp/theme"
 	"cliamp/ui"
 )
+
+func (m *Model) handleProviderError(err error) tea.Cmd {
+	m.provLoading = false
+	if errors.Is(err, playlist.ErrNeedsAuth) {
+		m.provSignIn = true
+		m.err = nil
+	} else {
+		m.err = err
+	}
+	return nil
+}
 
 // Update handles messages: key presses, ticks, and window resizes.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -269,10 +282,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tickCmdAt(m.tickInterval()))
 		return m, tea.Batch(cmds...)
 
-	case []playlist.PlaylistInfo:
-		m.providerLists = msg
+	case providerListsMsg:
+		if msg.err != nil {
+			return m, m.handleProviderError(msg.err)
+		}
+		m.providerLists = msg.playlists
+		if m.providerLists == nil {
+			m.providerLists = []playlist.PlaylistInfo{}
+		}
 		m.provLoading = false
-		// Start loading catalog when the provider supports lazy catalog loading.
 		if loader, ok := m.provider.(provider.CatalogLoader); ok && !m.catalogBatch.loading && !m.catalogBatch.done {
 			m.catalogBatch.loading = true
 			return m, fetchCatalogBatchCmd(loader, m.catalogBatch.offset, catalogBatchSize)
@@ -280,22 +298,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tracksLoadedMsg:
+		if msg.err != nil {
+			m.pendingSource = source.Ref{}
+			return m, m.handleProviderError(msg.err)
+		}
 		wasPlaying := m.player.IsPlaying()
 		if !wasPlaying {
 			m.player.Stop()
 			m.player.ClearPreload()
 		}
 		m.resetYTDLBatch()
-		m.playlist.Replace(msg)
-		m.plCursor = 0
-		m.plScroll = 0
-		m.focus = focusPlaylist
+		m.replacePlaylistFromPendingSource(msg.tracks)
 		m.provLoading = false
 		if m.playlist.Len() > 0 && !wasPlaying {
 			cmd := m.playCurrentTrack()
 			m.notifyAll()
 			return m, cmd
 		}
+		return m, nil
+
+	case sourceRestoreTracksMsg:
+		if !m.restore.pending() || msg.token != m.restore.token {
+			return m, nil
+		}
+		if msg.result.Err != nil && errors.Is(msg.result.Err, playlist.ErrNeedsAuth) {
+			m.handleProviderError(msg.result.Err)
+			return m, nil
+		}
+		rs := m.restore.plan.State
+		m.restore.plan = session.RestorePlan{}
+		m.provLoading = false
+		if msg.result.Err != nil && len(msg.result.Tracks) == 0 {
+			if errors.Is(msg.result.Err, session.ErrSavedSourceEmpty) {
+				m.status.Show("Saved source is empty", statusTTLDefault)
+			} else {
+				m.status.Show("Could not restore session", statusTTLDefault)
+			}
+			return m, m.ensureProviderListsLoaded()
+		}
+		cmd := m.applyRestoredTracks(rs, msg.result.Tracks)
+		return m, cmd
+
+	case cachedRestoreRefetchMsg:
+		if msg.err != nil || msg.source != m.source {
+			return m, nil
+		}
+		metaKey := m.resumeMetaKey()
+		currentState := session.CapturePlaylistState(metaKey, m.playlist)
+		oldTracks := m.playlist.Tracks()
+		trackIdx, err := session.RestorePlaylistState(m.playlist, currentState, msg.tracks)
+		if err != nil {
+			session.RestorePlaylistState(m.playlist, currentState, oldTracks)
+			return m, nil
+		}
+		m.plCursor = trackIdx
+		m.adjustScroll()
+		m.applySavedCurrentTitle(currentState, trackIdx)
 		return m, nil
 
 	case navArtistsLoadedMsg:
@@ -386,7 +444,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ytdlBatch.done = true
 			return m, nil
 		}
-		m.playlist.Add(msg.tracks...)
+		m.appendTransientTracks(msg.tracks)
 		m.ytdlBatch.offset += len(msg.tracks)
 		if len(msg.tracks) < ytdlBatchSize {
 			m.ytdlBatch.done = true
@@ -402,9 +460,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status.Show("No episodes found in feed.", statusTTLDefault)
 			return m, nil
 		}
-		m.playlist.Replace(msg.tracks)
-		m.plCursor = 0
-		m.plScroll = 0
+		m.replacePlaylistTransient(msg.tracks)
 		m.status.Showf(statusTTLDefault, "Loaded %d episode(s)", len(msg.tracks))
 		playCmd := m.playCurrentTrack()
 		m.notifyAll()
@@ -413,7 +469,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case feedsLoadedMsg:
 		m.feedLoading = false
 		if len(msg.tracks) > 0 {
-			m.playlist.Add(msg.tracks...)
+			m.appendTransientTracks(msg.tracks)
 			m.status.Showf(statusTTLDefault, "Loaded %d track(s)", len(msg.tracks))
 		} else {
 			m.status.Show("No tracks found at URL.", statusTTLDefault)
@@ -442,11 +498,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status.Show("No tracks found online.", statusTTLDefault)
 			return m, nil
 		}
-		startIdx := m.playlist.Len()
-		m.playlist.Add(msg...)
-		for i := startIdx; i < m.playlist.Len(); i++ {
-			m.playlist.Queue(i)
-		}
+		m.appendTransientTracksToQueue(msg)
 		m.status.Showf(statusTTLDefault, "Added to Queue: %s", msg[0].DisplayName())
 		if !m.player.IsPlaying() {
 			cmd := m.playCurrentTrack()
@@ -473,11 +525,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.player.Stop()
 			m.player.ClearPreload()
 			m.resetYTDLBatch()
-			m.playlist.Replace(msg.tracks)
-			m.plCursor = 0
-			m.plScroll = 0
+			m.replacePlaylistTransient(msg.tracks)
 		} else {
-			m.playlist.Add(msg.tracks...)
+			m.appendTransientTracks(msg.tracks)
 		}
 		m.focus = focusPlaylist
 		m.status.Showf(statusTTLDefault, "Added %d track(s)", len(msg.tracks))
@@ -575,7 +625,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status.Showf(statusTTLDefault, "Added to %q", msg.name)
-		m.spotSearch.visible = false
+		m.closeScreen(screenSpotSearch)
 		return m, nil
 
 	case spotCreatedMsg:
@@ -585,7 +635,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status.Showf(statusTTLDefault, "Created %q & added track", msg.name)
-		m.spotSearch.visible = false
+		m.closeScreen(screenSpotSearch)
 		return m, nil
 
 	case provAuthDoneMsg:
@@ -597,13 +647,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.provSignIn = false
 		m.provLoading = true
-		return m, fetchPlaylistsCmd(m.provider)
+		return m, m.providerLoadCmd()
 
 	case devicesListedMsg:
 		m.devicePicker.loading = false
 		if msg.err != nil {
 			m.status.Showf(statusTTLDefault, "Device list failed: %s", msg.err)
-			m.devicePicker.visible = false
+			m.closeScreen(screenDevicePicker)
 		} else {
 			m.devicePicker.devices = msg.devices
 		}
@@ -715,8 +765,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.playlist.Replace(tracks)
-		m.loadedPlaylist = msg.Playlist
+		m.ResumePlaylist(msg.Playlist, tracks)
 		cmd := m.playCurrentTrack()
 		m.notifyAll()
 		if msg.Reply != nil {
@@ -725,7 +774,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case ipc.QueueMsg:
 		t := playlist.Track{Path: msg.Path, Title: msg.Path}
-		m.playlist.Add(t)
+		m.appendTransientTracks([]playlist.Track{t})
 		m.notifyAll()
 		return m, nil
 	case ipc.ThemeMsg:

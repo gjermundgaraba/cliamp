@@ -117,7 +117,11 @@ URLs with `.xml`, `.rss`, or `.atom` extensions are also auto-detected as feeds 
 
 ### Browsing and Loading Playlists
 
-Running `cliamp` without arguments connects to the built-in radio channel. If Navidrome is configured, it opens the provider browser instead.
+Running `cliamp` without arguments starts in the configured startup provider. If no startup provider is configured, cliamp starts on the last selected provider from `resume.json`, or falls back to Radio if none is saved.
+
+If `resume.json` contains a resumable session, cliamp also restores that playlist or source when possible. Source-backed restores switch to their owning provider automatically.
+
+That resume state is only loaded by the instance that owns `~/.config/cliamp/cliamp.sock`. If another cliamp process already owns the socket, the new process starts without restoring `resume.json`.
 
 To browse your local playlists, press `Esc` or `b` during playback to open the provider browser. Navigate with `Up`/`Down` (or `j`/`k`) and press `Enter` to load a playlist. Tracks replace the current playlist and playback starts immediately. Press `Tab` to jump back to the now-playing playlist without reloading.
 
@@ -185,4 +189,3 @@ title = "My Radio"
 | `a` | Add currently playing track |
 | `d` | Delete playlist (confirms) / Remove track |
 | `Esc` / `←` | Close / Go back |
-

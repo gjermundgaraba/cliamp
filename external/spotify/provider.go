@@ -21,6 +21,7 @@ import (
 	"github.com/gopxl/beep/v2"
 
 	"cliamp/applog"
+	"cliamp/internal/source"
 	"cliamp/playlist"
 	"cliamp/provider"
 )
@@ -32,6 +33,7 @@ var (
 	_ provider.PlaylistCreator = (*SpotifyProvider)(nil)
 	_ provider.CustomStreamer  = (*SpotifyProvider)(nil)
 	_ provider.Closer          = (*SpotifyProvider)(nil)
+	_ source.Restorer          = (*SpotifyProvider)(nil)
 )
 
 // maxResponseBody limits JSON API responses to 10 MB.
@@ -185,6 +187,10 @@ func (p *SpotifyProvider) Close() {
 		p.session = nil
 		p.userID = ""
 	}
+}
+
+func (p *SpotifyProvider) RestoreSource(sourceRef source.Ref) ([]playlist.Track, error) {
+	return p.Tracks(sourceRef.ID)
 }
 
 func (p *SpotifyProvider) Name() string { return "Spotify" }

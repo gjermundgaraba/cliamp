@@ -3,6 +3,7 @@ package model
 import (
 	tea "charm.land/bubbletea/v2"
 
+	"cliamp/internal/source"
 	"cliamp/playlist"
 	"cliamp/provider"
 )
@@ -10,7 +11,7 @@ import (
 // handleNavBrowserKey processes key presses while the provider browser is open.
 func (m *Model) handleNavBrowserKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.navBrowser.prov == nil {
-		m.navBrowser.visible = false
+		m.closeScreen(screenNavBrowser)
 		return nil
 	}
 
@@ -47,7 +48,7 @@ func (m *Model) handleNavMenuKey(msg tea.KeyPressMsg) tea.Cmd {
 	const menuItems = 3
 	switch msg.String() {
 	case "ctrl+c":
-		m.navBrowser.visible = false
+		m.closeScreen(screenNavBrowser)
 		return m.quit()
 	case "up", "k":
 		if m.navBrowser.cursor > 0 {
@@ -99,7 +100,7 @@ func (m *Model) handleNavMenuKey(msg tea.KeyPressMsg) tea.Cmd {
 			return fetchNavArtistsCmd(ab)
 		}
 	case "esc", "N", "backspace", "b":
-		m.navBrowser.visible = false
+		m.closeScreen(screenNavBrowser)
 	}
 	return nil
 }
@@ -146,7 +147,7 @@ func (m *Model) handleNavArtistListKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	switch msg.String() {
 	case "ctrl+c":
-		m.navBrowser.visible = false
+		m.closeScreen(screenNavBrowser)
 		return m.quit()
 	case "up", "k":
 		if m.navBrowser.cursor > 0 {
@@ -206,7 +207,7 @@ func (m *Model) handleNavAlbumListKey(msg tea.KeyPressMsg, artistAlbums bool) te
 
 	switch msg.String() {
 	case "ctrl+c":
-		m.navBrowser.visible = false
+		m.closeScreen(screenNavBrowser)
 		return m.quit()
 	case "up", "k":
 		if m.navBrowser.cursor > 0 {
@@ -287,7 +288,7 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	switch msg.String() {
 	case "ctrl+c":
-		m.navBrowser.visible = false
+		m.closeScreen(screenNavBrowser)
 		return m.quit()
 	case "up", "k":
 		if m.navBrowser.cursor > 0 {
@@ -327,8 +328,7 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			}
 
-			m.playlist.Add(toAdd...)
-			newIdx := m.playlist.Len() - len(toAdd)
+			newIdx := m.appendTransientTracks(toAdd)
 			m.playlist.SetIndex(newIdx)
 			m.plCursor = newIdx
 			m.adjustScroll()
@@ -356,12 +356,11 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.player.Stop()
 			m.player.ClearPreload()
 			m.resetYTDLBatch()
-			m.playlist.Replace(tracks)
-			m.plCursor = 0
-			m.plScroll = 0
+			source := m.navTrackListSource()
+			m.replacePlaylistWithSource(tracks, source)
 			m.playlist.SetIndex(0)
 			m.focus = focusPlaylist
-			m.navBrowser.visible = false
+			m.closeScreen(screenNavBrowser)
 			cmd := m.playCurrentTrack()
 			m.notifyPlayback()
 			return cmd
@@ -378,7 +377,7 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		if len(tracks) > 0 {
 			wasEmpty := m.playlist.Len() == 0
-			m.playlist.Add(tracks...)
+			m.appendTransientTracks(tracks)
 			m.status.Showf(statusTTLMedium, "Added %d tracks", len(tracks))
 			if wasEmpty || !m.player.IsPlaying() {
 				m.playlist.SetIndex(0)
@@ -398,9 +397,7 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		if rawIdx < len(m.navBrowser.tracks) {
 			t := m.navBrowser.tracks[rawIdx]
-			m.playlist.Add(t)
-			newIdx := m.playlist.Len() - 1
-			m.playlist.Queue(newIdx)
+			m.appendTransientTrackToQueue(t)
 			m.status.Showf(statusTTLMedium, "Queued: %s", t.DisplayName())
 			if !m.player.IsPlaying() {
 				m.playlist.Next()
@@ -424,6 +421,22 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func (m *Model) navTrackListSource() source.Ref {
+	if len(m.navBrowser.searchIdx) > 0 || m.navBrowser.selAlbum.ID == "" {
+		return source.Ref{}
+	}
+	switch m.navBrowser.mode {
+	case navBrowseModeByAlbum, navBrowseModeByArtistAlbum:
+		return source.Ref{
+			ProviderKey: m.providerKeyFor(m.navBrowser.prov),
+			Kind:        source.Album,
+			ID:          m.navBrowser.selAlbum.ID,
+		}
+	default:
+		return source.Ref{}
+	}
 }
 
 // handleNavSearchKey handles key input while the nav search bar is open.

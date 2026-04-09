@@ -8,11 +8,11 @@ import (
 // and opens the theme selector overlay.
 func (m *Model) openThemePicker() {
 	m.themes = theme.LoadAll()
-	m.themePicker.visible = true
 	m.themePicker.savedIdx = m.themeIdx
 	// Position cursor on the currently active theme.
 	// Picker list: 0 = Default, 1..N = themes[0..N-1]
 	m.themePicker.cursor = m.themeIdx + 1
+	m.pushScreen(screenThemePicker)
 }
 
 // themePickerApply applies the theme under the cursor for live preview.
@@ -29,7 +29,7 @@ func (m *Model) themePickerApply() {
 // themePickerSelect confirms the current selection and closes the picker.
 func (m *Model) themePickerSelect() {
 	m.themePickerApply()
-	m.themePicker.visible = false
+	m.closeScreen(screenThemePicker)
 }
 
 // themePickerCancel restores the theme from before the picker was opened.
@@ -40,7 +40,7 @@ func (m *Model) themePickerCancel() {
 	} else {
 		applyThemeAll(m.themes[m.themeIdx])
 	}
-	m.themePicker.visible = false
+	m.closeScreen(screenThemePicker)
 }
 
 // openPlaylistManager loads playlist metadata and opens the manager overlay.
@@ -48,7 +48,7 @@ func (m *Model) openPlaylistManager() {
 	m.plMgrRefreshList()
 	m.plManager.screen = plMgrScreenList
 	m.plManager.confirmDel = false
-	m.plManager.visible = true
+	m.pushScreen(screenPlaylistManager)
 }
 
 // plMgrEnterTrackList loads the tracks for a playlist and switches to screen 1.

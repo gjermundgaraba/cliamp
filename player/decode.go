@@ -78,11 +78,6 @@ func (s *sshReadCloser) Close() error {
 	return nil
 }
 
-// shellQuoteSSH wraps a string in single quotes for safe use in a remote shell command.
-// Single quotes inside the string are escaped as '\” (end quote, escaped quote, start quote).
-func shellQuoteSSH(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
 
 // openSSHSource opens a remote file via SSH by running "ssh host cat remotePath"
 // and returning the stdout pipe as an io.ReadCloser.
@@ -93,7 +88,7 @@ func openSSHSource(path string) (sourceResult, error) {
 		return sourceResult{}, err
 	}
 
-	catCmd := "cat -- " + shellQuoteSSH(parsed.Path)
+	catCmd := "cat -- " + sshurl.ShellQuote(parsed.Path)
 	args := parsed.SSHArgs()
 	args = append(args, catCmd)
 	cmd := exec.Command("ssh", args...)

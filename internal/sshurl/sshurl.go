@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strings"
 )
 
 // Parsed holds the components of an ssh:// URL.
@@ -23,6 +24,10 @@ func (p Parsed) SSHArgs() []string {
 	}
 	args = append(args, p.Host)
 	return args
+}
+
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // Parse parses an ssh:// URL into host, port, and path components.

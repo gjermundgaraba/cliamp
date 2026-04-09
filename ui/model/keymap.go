@@ -74,11 +74,11 @@ func (m *Model) handleKeymapKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	switch {
 	case key == "ctrl+c":
-		m.keymap.visible = false
+		m.closeScreen(screenKeymap)
 		return m.quit()
 
 	case msg.Code == tea.KeyEscape:
-		m.keymap.visible = false
+		m.closeScreen(screenKeymap)
 		m.keymap.search = ""
 		m.keymap.filtered = nil
 		m.keymap.cursor = 0

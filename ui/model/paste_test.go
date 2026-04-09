@@ -17,7 +17,7 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 	}{
 		{
 			name:    "keymap search",
-			model:   Model{keymap: keymapOverlay{visible: true}},
+			model:   Model{screenStack: []topLevelScreen{screenKeymap}},
 			content: "ctrl",
 			check: func(t *testing.T, m *Model) {
 				if m.keymap.search != "ctrl" {
@@ -27,7 +27,7 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 		},
 		{
 			name:    "net search",
-			model:   Model{netSearch: netSearchState{active: true, query: "hello "}},
+			model:   Model{screenStack: []topLevelScreen{screenNetSearch}, netSearch: netSearchState{query: "hello "}},
 			content: "world",
 			check: func(t *testing.T, m *Model) {
 				if m.netSearch.query != "hello world" {
@@ -37,7 +37,7 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 		},
 		{
 			name:    "search appends and filters",
-			model:   Model{search: searchState{active: true, query: "ja"}, playlist: playlist.New()},
+			model:   Model{screenStack: []topLevelScreen{screenSearch}, search: searchState{query: "ja"}, playlist: playlist.New()},
 			content: "zz",
 			check: func(t *testing.T, m *Model) {
 				if m.search.query != "jazz" {
@@ -47,7 +47,7 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 		},
 		{
 			name:    "jump input",
-			model:   Model{jumping: true, jumpInput: "1:"},
+			model:   Model{screenStack: []topLevelScreen{screenJump}, jumpInput: "1:"},
 			content: "30",
 			check: func(t *testing.T, m *Model) {
 				if m.jumpInput != "1:30" {
@@ -57,7 +57,7 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 		},
 		{
 			name:    "url input",
-			model:   Model{urlInputting: true},
+			model:   Model{screenStack: []topLevelScreen{screenURLInput}},
 			content: "https://example.com/song.mp3",
 			check: func(t *testing.T, m *Model) {
 				if m.urlInput != "https://example.com/song.mp3" {
@@ -68,8 +68,7 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 		{
 			name: "playlist manager new name",
 			model: Model{plManager: plManagerState{
-				visible: true,
-				screen:  plMgrScreenNewName,
+				screen: plMgrScreenNewName,
 			}},
 			content: "My Playlist",
 			check: func(t *testing.T, m *Model) {
@@ -81,8 +80,7 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 		{
 			name: "spotify search input",
 			model: Model{spotSearch: spotSearchState{
-				visible: true,
-				screen:  spotSearchInput,
+				screen: spotSearchInput,
 			}},
 			content: "arctic monkeys",
 			check: func(t *testing.T, m *Model) {
@@ -94,8 +92,7 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 		{
 			name: "spotify new name",
 			model: Model{spotSearch: spotSearchState{
-				visible: true,
-				screen:  spotSearchNewName,
+				screen: spotSearchNewName,
 			}},
 			content: "New Playlist",
 			check: func(t *testing.T, m *Model) {
@@ -117,7 +114,6 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 		{
 			name: "nav browser search",
 			model: Model{navBrowser: navBrowserState{
-				visible:   true,
 				mode:      navBrowseModeByAlbum,
 				searching: true,
 			}},
@@ -133,6 +129,14 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := tt.model
+			switch tt.name {
+			case "playlist manager new name":
+				m.screenStack = []topLevelScreen{screenPlaylistManager}
+			case "spotify search input", "spotify new name":
+				m.screenStack = []topLevelScreen{screenSpotSearch}
+			case "nav browser search":
+				m.screenStack = []topLevelScreen{screenNavBrowser}
+			}
 			if cmd := m.handlePaste(tt.content); cmd != nil {
 				t.Fatalf("handlePaste returned non-nil cmd")
 			}
@@ -164,12 +168,12 @@ func TestHandlePastePriorityOrder(t *testing.T) {
 	// When multiple input states are active, the highest-priority one wins.
 	// Nav browser search has higher priority than net search.
 	m := Model{
+		screenStack: []topLevelScreen{screenNetSearch, screenNavBrowser},
 		navBrowser: navBrowserState{
-			visible:   true,
 			mode:      navBrowseModeByAlbum,
 			searching: true,
 		},
-		netSearch: netSearchState{active: true},
+		netSearch: netSearchState{},
 	}
 
 	m.handlePaste("test")
@@ -183,7 +187,7 @@ func TestHandlePastePriorityOrder(t *testing.T) {
 }
 
 func TestUpdateRoutesPasteMsg(t *testing.T) {
-	m := Model{netSearch: netSearchState{active: true}}
+	m := Model{screenStack: []topLevelScreen{screenNetSearch}}
 
 	next, cmd := m.Update(tea.PasteMsg{Content: "pasted"})
 	got := next.(Model)

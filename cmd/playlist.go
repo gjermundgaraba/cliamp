@@ -344,13 +344,10 @@ func PlaylistEnrich(name string) error {
 
 func probeRemoteDuration(host, remotePath string) int {
 	// Use ffprobe over SSH for cross-platform compatibility (works on Linux and macOS remotes).
-	probeCmd := fmt.Sprintf("ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 %s 2>/dev/null", shellQuote(remotePath))
-	cmd := exec.Command("ssh",
-		"-o", "BatchMode=yes",
-		"-o", "StrictHostKeyChecking=yes",
-		"-o", "ConnectTimeout=5",
-		host, probeCmd,
-	)
+	probeCmd := fmt.Sprintf("ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 %s 2>/dev/null", sshurl.ShellQuote(remotePath))
+	args := sshurl.Parsed{Host: host}.SSHArgs()
+	args = append(args, probeCmd)
+	cmd := exec.Command("ssh", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return 0
@@ -378,10 +375,6 @@ func collectLocalAudio(paths []string) ([]string, error) {
 	return all, nil
 }
 
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
 func sshFindAudio(host string, paths []string) ([]string, error) {
 	var nameArgs []string
 	first := true
@@ -396,9 +389,10 @@ func sshFindAudio(host string, paths []string) ([]string, error) {
 	var allFiles []string
 	for _, p := range paths {
 		findCmd := fmt.Sprintf("find %s -type f \\( %s \\) | sort",
-			shellQuote(p), strings.Join(nameArgs, " "))
+			sshurl.ShellQuote(p), strings.Join(nameArgs, " "))
 
-		sshArgs := []string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5", host, findCmd}
+		sshArgs := sshurl.Parsed{Host: host}.SSHArgs()
+		sshArgs = append(sshArgs, findCmd)
 		cmd := exec.Command("ssh", sshArgs...)
 		out, err := cmd.Output()
 		if err != nil {

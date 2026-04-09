@@ -9,6 +9,7 @@ var ErrNeedsAuth = errors.New("sign-in required")
 // PlaylistInfo describes a playlist with its name and track count.
 type PlaylistInfo struct {
 	ID         string
+	SourceID   string // stable ID for session persistence; empty means use ID
 	Name       string
 	TrackCount int
 }

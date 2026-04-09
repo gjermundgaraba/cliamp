@@ -1,6 +1,3 @@
-// state.go defines sub-structs that group related fields in the Model,
-// making the overall model scannable and maintainable.
-
 package model
 
 import (
@@ -9,11 +6,21 @@ import (
 	"time"
 
 	"cliamp/applog"
+	"cliamp/internal/session"
 	"cliamp/lyrics"
 	"cliamp/player"
 	"cliamp/playlist"
 	"cliamp/provider"
 )
+
+type pendingRestore struct {
+	plan  session.RestorePlan
+	token uint64
+}
+
+func (r pendingRestore) pending() bool {
+	return r.plan.Mode == session.RestoreDeferred && r.plan.State.IsSourceSession()
+}
 
 // searchState holds state for the playlist search overlay.
 type searchState struct {

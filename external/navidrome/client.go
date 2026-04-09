@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"cliamp/config"
+	"cliamp/internal/source"
 	"cliamp/playlist"
 	"cliamp/provider"
 )
@@ -26,6 +27,8 @@ var (
 	_ provider.AlbumTrackLoader = (*NavidromeClient)(nil)
 	_ provider.AlbumSortSaver   = (*NavidromeClient)(nil)
 	_ provider.PlaybackReporter = (*NavidromeClient)(nil)
+	_ source.Matcher            = (*NavidromeClient)(nil)
+	_ source.Restorer           = (*NavidromeClient)(nil)
 )
 
 // httpClient is used for all Navidrome API calls with a finite timeout.
@@ -33,6 +36,8 @@ var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 // maxResponseBody limits JSON API responses to 10 MB to prevent unbounded memory growth.
 const maxResponseBody = 10 << 20
+
+const resumeMetaKey = "navidrome.id"
 
 // Sort type constants for album browsing (Subsonic getAlbumList2 "type" parameter).
 const (
@@ -401,6 +406,19 @@ func (c *NavidromeClient) AlbumTracks(albumID string) ([]playlist.Track, error) 
 	return tracks, nil
 }
 
+func (c *NavidromeClient) RestoreSource(sourceRef source.Ref) ([]playlist.Track, error) {
+	switch sourceRef.Kind {
+	case source.Album:
+		return c.AlbumTracks(sourceRef.ID)
+	default:
+		return c.Tracks(sourceRef.ID)
+	}
+}
+
+func (c *NavidromeClient) ResumeMetaKey() string {
+	return resumeMetaKey
+}
+
 // subsonicSong holds the common JSON fields returned by the Subsonic API
 // for tracks in both getPlaylist and getAlbum responses.
 type subsonicSong struct {
@@ -425,7 +443,7 @@ func (c *NavidromeClient) songToTrack(s subsonicSong) playlist.Track {
 		Genre:        s.Genre,
 		Stream:       true,
 		DurationSecs: s.Duration,
-		ProviderMeta: map[string]string{provider.MetaNavidromeID: s.ID},
+		ProviderMeta: map[string]string{resumeMetaKey: s.ID},
 	}
 }
 
@@ -462,15 +480,15 @@ func (c *NavidromeClient) streamURL(id string) string {
 }
 
 func (c *NavidromeClient) CanReportPlayback(track playlist.Track) bool {
-	return !c.scrobbleDisabled && track.Meta(provider.MetaNavidromeID) != ""
+	return !c.scrobbleDisabled && track.Meta(resumeMetaKey) != ""
 }
 
 func (c *NavidromeClient) ReportNowPlaying(track playlist.Track, _ time.Duration, _ bool) {
-	c.scrobble(track.Meta(provider.MetaNavidromeID), false)
+	c.scrobble(track.Meta(resumeMetaKey), false)
 }
 
 func (c *NavidromeClient) ReportScrobble(track playlist.Track, _, _ time.Duration, _ bool) {
-	c.scrobble(track.Meta(provider.MetaNavidromeID), true)
+	c.scrobble(track.Meta(resumeMetaKey), true)
 }
 
 // scrobble reports playback of a track to the Subsonic server.

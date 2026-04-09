@@ -13,7 +13,10 @@ import (
 type fakeEngine struct {
 	streamSeek bool
 	seekCalls  []time.Duration
-	position   time.Duration
+	pos        time.Duration
+	closed     bool
+	stopCalls  int
+	notPlaying bool
 }
 
 func (f *fakeEngine) Play(string, time.Duration) error                    { return nil }
@@ -21,13 +24,13 @@ func (f *fakeEngine) PlayYTDL(string, time.Duration) error                { retu
 func (f *fakeEngine) Preload(string, time.Duration) error                 { return nil }
 func (f *fakeEngine) PreloadYTDL(string, time.Duration) error             { return nil }
 func (f *fakeEngine) ClearPreload()                                       {}
-func (f *fakeEngine) Stop()                                               {}
-func (f *fakeEngine) Close()                                              {}
+func (f *fakeEngine) Stop()                                               { f.stopCalls++ }
+func (f *fakeEngine) Close()                                              { f.closed = true }
 func (f *fakeEngine) TogglePause()                                        {}
 func (f *fakeEngine) Seek(d time.Duration) error                          { f.seekCalls = append(f.seekCalls, d); return nil }
 func (f *fakeEngine) SeekYTDL(time.Duration) error                        { return nil }
 func (f *fakeEngine) CancelSeekYTDL()                                     {}
-func (f *fakeEngine) IsPlaying() bool                                     { return true }
+func (f *fakeEngine) IsPlaying() bool                                     { return !f.notPlaying }
 func (f *fakeEngine) IsPaused() bool                                      { return false }
 func (f *fakeEngine) Drained() bool                                       { return false }
 func (f *fakeEngine) HasPreload() bool                                    { return false }
@@ -35,9 +38,9 @@ func (f *fakeEngine) Seekable() bool                                      { retu
 func (f *fakeEngine) IsStreamSeek() bool                                  { return f.streamSeek }
 func (f *fakeEngine) IsYTDLSeek() bool                                    { return false }
 func (f *fakeEngine) GaplessAdvanced() bool                               { return false }
-func (f *fakeEngine) Position() time.Duration                             { return f.position }
+func (f *fakeEngine) Position() time.Duration                             { return f.pos }
 func (f *fakeEngine) Duration() time.Duration                             { return time.Hour }
-func (f *fakeEngine) PositionAndDuration() (time.Duration, time.Duration) { return 0, time.Hour }
+func (f *fakeEngine) PositionAndDuration() (time.Duration, time.Duration) { return f.pos, time.Hour }
 func (f *fakeEngine) SetVolume(float64)                                   {}
 func (f *fakeEngine) Volume() float64                                     { return 0 }
 func (f *fakeEngine) SetSpeed(float64)                                    {}
@@ -79,7 +82,7 @@ func assertDeferredStreamSeek(t *testing.T, eng *fakeEngine, cmd tea.Cmd, positi
 		t.Fatalf("Seek call count before cmd() = %d, want 0", len(eng.seekCalls))
 	}
 
-	eng.position = position
+	eng.pos = position
 	assertStreamSeekCmd(t, eng, cmd, want)
 }
 
@@ -127,7 +130,7 @@ func TestDeferredHTTPStreamSeek(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			eng := &fakeEngine{streamSeek: true, position: tt.initialPos}
+			eng := &fakeEngine{streamSeek: true, pos: tt.initialPos}
 			m := Model{player: eng}
 
 			cmd := tt.invoke(&m)
@@ -173,7 +176,7 @@ func TestImmediateHTTPStreamSeek(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			eng := &fakeEngine{streamSeek: true, position: 3 * time.Second}
+			eng := &fakeEngine{streamSeek: true, pos: 3 * time.Second}
 			m := Model{player: eng}
 
 			cmd := tt.invoke(&m)

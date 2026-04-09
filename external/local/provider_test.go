@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"cliamp/internal/source"
 	"cliamp/playlist"
 )
 
@@ -221,6 +222,31 @@ func TestPlaylistsLists(t *testing.T) {
 	}
 	if counts["jazz"] != 2 {
 		t.Fatalf("jazz has %d tracks, want 2", counts["jazz"])
+	}
+
+	for _, list := range lists {
+		if list.SourceID != list.ID {
+			t.Fatalf("playlist %q SourceID = %q, want %q", list.Name, list.SourceID, list.ID)
+		}
+	}
+}
+
+func TestRestoreSource(t *testing.T) {
+	p := newTestProvider(t)
+	if err := p.savePlaylist("mix", []playlist.Track{{Path: "/a.mp3", Title: "A"}}); err != nil {
+		t.Fatalf("savePlaylist: %v", err)
+	}
+
+	tracks, err := p.RestoreSource(source.Ref{
+		ProviderKey: "local",
+		Kind:        source.Playlist,
+		ID:          "mix",
+	})
+	if err != nil {
+		t.Fatalf("RestoreSource: %v", err)
+	}
+	if len(tracks) != 1 || tracks[0].Path != "/a.mp3" {
+		t.Fatalf("RestoreSource() = %+v, want saved playlist tracks", tracks)
 	}
 }
 

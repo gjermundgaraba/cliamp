@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := defaultConfig()
@@ -414,6 +418,26 @@ func TestYouTubeMusicResolveCredentials(t *testing.T) {
 	}
 }
 
+func TestLoadParsesPlaylist(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".config", "cliamp")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("playlist = \"mix\"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Playlist != "mix" {
+		t.Fatalf("Playlist = %q, want mix", cfg.Playlist)
+	}
+}
+
 func TestOverridesApply(t *testing.T) {
 	cfg := defaultConfig()
 
@@ -425,6 +449,7 @@ func TestOverridesApply(t *testing.T) {
 	compact := true
 	sr := 48000
 	play := true
+	playlist := "mix"
 
 	overrides := Overrides{
 		Volume:     &vol,
@@ -435,6 +460,7 @@ func TestOverridesApply(t *testing.T) {
 		Compact:    &compact,
 		SampleRate: &sr,
 		Play:       &play,
+		Playlist:   &playlist,
 	}
 
 	overrides.Apply(&cfg)
@@ -462,6 +488,9 @@ func TestOverridesApply(t *testing.T) {
 	}
 	if !cfg.AutoPlay {
 		t.Error("AutoPlay should be true")
+	}
+	if cfg.Playlist != "mix" {
+		t.Errorf("Playlist = %q, want mix", cfg.Playlist)
 	}
 }
 

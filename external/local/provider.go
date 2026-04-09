@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"cliamp/internal/appdir"
+	"cliamp/internal/source"
 	"cliamp/internal/tomlutil"
 	"cliamp/playlist"
 	"cliamp/provider"
@@ -24,6 +25,7 @@ import (
 var (
 	_ provider.PlaylistWriter  = (*Provider)(nil)
 	_ provider.PlaylistDeleter = (*Provider)(nil)
+	_ source.Restorer          = (*Provider)(nil)
 )
 
 // Provider reads and writes TOML-based playlists stored on disk.
@@ -79,6 +81,7 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 		}
 		lists = append(lists, playlist.PlaylistInfo{
 			ID:         name,
+			SourceID:   name,
 			Name:       name,
 			TrackCount: len(tracks),
 		})
@@ -93,6 +96,10 @@ func (p *Provider) Tracks(playlistID string) ([]playlist.Track, error) {
 		return nil, err
 	}
 	return p.loadTOML(path)
+}
+
+func (p *Provider) RestoreSource(sourceRef source.Ref) ([]playlist.Track, error) {
+	return p.Tracks(sourceRef.ID)
 }
 
 // AddTrack appends a track to the named playlist, creating the directory and
