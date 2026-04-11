@@ -38,7 +38,7 @@ func (m *Model) lyricsSyncable() bool {
 	}
 	// ICY radio streams: position counts from stream connect, not song start.
 	// Provider streams with metadata (e.g. Navidrome) track position correctly.
-	if track.Stream && len(track.ProviderMeta) == 0 {
+	if track.Stream && track.Owner.IsZero() {
 		return false
 	}
 	return true

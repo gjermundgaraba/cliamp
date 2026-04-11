@@ -15,6 +15,7 @@ import (
 	"cliamp/ipc"
 	"cliamp/player"
 	"cliamp/pluginmgr"
+	"cliamp/provider"
 	"cliamp/theme"
 	"cliamp/ui"
 	"cliamp/upgrade"
@@ -29,7 +30,7 @@ func buildApp() *cli.Command {
 		&cli.BoolFlag{Name: "no-mono", Usage: "disable mono output"},
 		&cli.BoolFlag{Name: "auto-play", Usage: "start playback immediately"},
 		&cli.BoolFlag{Name: "compact", Usage: "compact mode (80 columns)"},
-		&cli.StringFlag{Name: "provider", Usage: "default provider: radio, navidrome, plex, jellyfin, spotify, yt, youtube, ytmusic"},
+		&cli.StringFlag{Name: "provider", Usage: "default provider: " + provider.DefaultProviderUsage()},
 		&cli.StringFlag{Name: "start-theme", Usage: "UI theme name"},
 		&cli.StringFlag{Name: "visualizer", Usage: "visualizer mode"},
 		&cli.StringFlag{Name: "eq-preset", Usage: "EQ preset name"},
@@ -139,12 +140,11 @@ func overridesFromFlags(c *cli.Command) (config.Overrides, error) {
 	}
 	if c.IsSet("provider") {
 		v := strings.ToLower(c.String("provider"))
-		switch v {
-		case "radio", "navidrome", "spotify", "plex", "jellyfin", "yt", "youtube", "ytmusic":
-			ov.Provider = &v
-		default:
-			return ov, fmt.Errorf("--provider must be radio, navidrome, spotify, plex, jellyfin, yt, youtube, or ytmusic (got %q)", v)
+		normalized, ok := provider.NormalizeDefaultProviderKey(v)
+		if !ok {
+			return ov, fmt.Errorf("--provider must be %s (got %q)", provider.DefaultProviderUsage(), v)
 		}
+		ov.Provider = &normalized
 	}
 	if c.IsSet("start-theme") {
 		v := c.String("start-theme")

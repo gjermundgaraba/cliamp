@@ -38,9 +38,56 @@ static void initApp(void) {
 	[NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 }
 
+static NSString *cachedArtworkPath = nil;
+static NSImage *cachedArtworkImage = nil;
+static MPMediaItemArtwork *cachedArtwork = nil;
+
+static void clearCachedArtwork(void) {
+	if (cachedArtworkPath) {
+		[cachedArtworkPath release];
+		cachedArtworkPath = nil;
+	}
+	if (cachedArtworkImage) {
+		[cachedArtworkImage release];
+		cachedArtworkImage = nil;
+	}
+	if (cachedArtwork) {
+		[cachedArtwork release];
+		cachedArtwork = nil;
+	}
+}
+
+static MPMediaItemArtwork *cachedArtworkForPath(const char *artworkPath) {
+	if (!artworkPath || artworkPath[0] == '\0') {
+		clearCachedArtwork();
+		return nil;
+	}
+
+	NSString *path = @(artworkPath);
+	if (cachedArtworkPath && [cachedArtworkPath isEqualToString:path]) {
+		return cachedArtwork;
+	}
+
+	clearCachedArtwork();
+
+	cachedArtworkImage = [[NSImage alloc] initWithContentsOfFile:path];
+	if (!cachedArtworkImage) {
+		return nil;
+	}
+
+	NSImage *image = cachedArtworkImage;
+	NSSize size = image.size;
+	cachedArtworkPath = [path copy];
+	cachedArtwork = [[MPMediaItemArtwork alloc] initWithBoundsSize:size requestHandler:^NSImage *(CGSize boundsSize) {
+		return image;
+	}];
+	return cachedArtwork;
+}
+
 static void clearNowPlaying(void) {
 	MPRemoteCommandCenter *cc = [MPRemoteCommandCenter sharedCommandCenter];
 	cc.changePlaybackPositionCommand.enabled = NO;
+	clearCachedArtwork();
 	[MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = nil;
 	[MPNowPlayingInfoCenter defaultCenter].playbackState = MPNowPlayingPlaybackStateStopped;
 }
@@ -125,13 +172,14 @@ static void bridgeDestroy(MediaCtlBridgeRef ref) {
 }
 
 // playbackState: 0 = stopped, 1 = playing, 2 = paused
-static void updateNowPlaying(const char *title, const char *artist, const char *album,
+static void updateNowPlaying(const char *title, const char *artist, const char *album, const char *artworkPath,
                               double durationSecs, double elapsedSecs, int playbackState, int canSeek) {
 	@autoreleasepool {
 		MPRemoteCommandCenter *cc = [MPRemoteCommandCenter sharedCommandCenter];
 		cc.changePlaybackPositionCommand.enabled = canSeek ? YES : NO;
 
 		if (playbackState == 0) {
+			clearCachedArtwork();
 			[MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = nil;
 			[MPNowPlayingInfoCenter defaultCenter].playbackState = MPNowPlayingPlaybackStateStopped;
 			return;
@@ -141,6 +189,14 @@ static void updateNowPlaying(const char *title, const char *artist, const char *
 		if (title)  info[MPMediaItemPropertyTitle] = @(title);
 		if (artist) info[MPMediaItemPropertyArtist] = @(artist);
 		if (album)  info[MPMediaItemPropertyAlbumTitle] = @(album);
+		if (artworkPath) {
+			MPMediaItemArtwork *artwork = cachedArtworkForPath(artworkPath);
+			if (artwork) {
+				info[MPMediaItemPropertyArtwork] = artwork;
+			}
+		} else {
+			clearCachedArtwork();
+		}
 		if (durationSecs > 0) info[MPMediaItemPropertyPlaybackDuration] = @(durationSecs);
 		if (elapsedSecs >= 0) info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(elapsedSecs);
 		info[MPNowPlayingInfoPropertyPlaybackRate] = @(playbackState == 1 ? 1.0 : 0.0);
@@ -198,6 +254,7 @@ func Run(prog *tea.Program, svc *Service) (tea.Model, error) {
 
 type updateReq struct {
 	title, artist, album      string
+	artworkPath               string
 	durationSecs, elapsedSecs float64
 	status                    playback.Status
 	canSeek                   bool
@@ -486,7 +543,7 @@ func (s *Service) beginRelease(allowRunLoop bool) (cgo.Handle, C.MediaCtlBridgeR
 }
 
 func applyUpdate(req updateReq) {
-	var cTitle, cArtist, cAlbum *C.char
+	var cTitle, cArtist, cAlbum, cArtwork *C.char
 	if req.title != "" {
 		cTitle = C.CString(req.title)
 		defer C.free(unsafe.Pointer(cTitle))
@@ -499,11 +556,15 @@ func applyUpdate(req updateReq) {
 		cAlbum = C.CString(req.album)
 		defer C.free(unsafe.Pointer(cAlbum))
 	}
+	if req.artworkPath != "" {
+		cArtwork = C.CString(req.artworkPath)
+		defer C.free(unsafe.Pointer(cArtwork))
+	}
 	canSeek := C.int(0)
 	if req.canSeek {
 		canSeek = 1
 	}
-	C.updateNowPlaying(cTitle, cArtist, cAlbum,
+	C.updateNowPlaying(cTitle, cArtist, cAlbum, cArtwork,
 		C.double(req.durationSecs), C.double(req.elapsedSecs), nowPlayingState(req.status), canSeek)
 }
 
@@ -526,6 +587,7 @@ func (s *Service) Update(state playback.State) {
 		title:        state.Track.Title,
 		artist:       state.Track.Artist,
 		album:        state.Track.Album,
+		artworkPath:  state.Track.ArtworkPath,
 		durationSecs: state.Track.Duration.Seconds(),
 		elapsedSecs:  state.Position.Seconds(),
 		status:       state.Status,

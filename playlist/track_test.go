@@ -2,35 +2,6 @@ package playlist
 
 import "testing"
 
-func TestTrackMeta(t *testing.T) {
-	t.Run("nil map returns empty", func(t *testing.T) {
-		tr := Track{Title: "Test"}
-		if got := tr.Meta("navidrome.id"); got != "" {
-			t.Errorf("Meta on nil map = %q, want empty", got)
-		}
-	})
-
-	t.Run("existing key", func(t *testing.T) {
-		tr := Track{
-			Title:        "Test",
-			ProviderMeta: map[string]string{"navidrome.id": "abc123"},
-		}
-		if got := tr.Meta("navidrome.id"); got != "abc123" {
-			t.Errorf("Meta = %q, want %q", got, "abc123")
-		}
-	})
-
-	t.Run("missing key", func(t *testing.T) {
-		tr := Track{
-			Title:        "Test",
-			ProviderMeta: map[string]string{"navidrome.id": "abc123"},
-		}
-		if got := tr.Meta("jellyfin.id"); got != "" {
-			t.Errorf("Meta = %q, want empty", got)
-		}
-	})
-}
-
 func TestTrackDisplayName(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -129,6 +100,81 @@ func TestTrackFromURL(t *testing.T) {
 				t.Errorf("Path = %q, want %q", tr.Path, tt.url)
 			}
 		})
+	}
+}
+
+func TestTrackFromPathYouTubeInfersArtwork(t *testing.T) {
+	tr := TrackFromPath("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+	if tr.Artwork.URL != "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" {
+		t.Fatalf("Artwork.URL = %q, want youtube thumbnail", tr.Artwork.URL)
+	}
+	if tr.Artwork.CacheKey != "youtube:dQw4w9WgXcQ" {
+		t.Fatalf("Artwork.CacheKey = %q, want youtube cache key", tr.Artwork.CacheKey)
+	}
+}
+
+func TestTrackFromPathShortYouTubeInfersArtwork(t *testing.T) {
+	tr := TrackFromPath("https://youtu.be/dQw4w9WgXcQ")
+	if tr.Artwork.URL != "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" {
+		t.Fatalf("Artwork.URL = %q, want youtube thumbnail", tr.Artwork.URL)
+	}
+	if tr.Artwork.CacheKey != "youtube:dQw4w9WgXcQ" {
+		t.Fatalf("Artwork.CacheKey = %q, want youtube cache key", tr.Artwork.CacheKey)
+	}
+}
+
+func TestTrackFromPathSpotifySkipsEmbeddedArtwork(t *testing.T) {
+	tr := TrackFromPath("spotify:track:abc123")
+	if tr.Path != "spotify:track:abc123" {
+		t.Fatalf("Path = %q, want spotify URI", tr.Path)
+	}
+	if tr.Stream {
+		t.Fatal("Stream = true, want false")
+	}
+	if !tr.Artwork.IsNone() {
+		t.Fatalf("Artwork = %+v, want none", tr.Artwork)
+	}
+}
+
+func TestTrackFromPathSSHSkipsEmbeddedArtwork(t *testing.T) {
+	tr := TrackFromPath("ssh://nas/music/Artist - Song.mp3")
+	if tr.Path != "ssh://nas/music/Artist - Song.mp3" {
+		t.Fatalf("Path = %q, want ssh URI", tr.Path)
+	}
+	if tr.Artist != "Artist" || tr.Title != "Song" {
+		t.Fatalf("parsed track = %+v, want Artist - Song", tr)
+	}
+	if tr.Stream {
+		t.Fatal("Stream = true, want false")
+	}
+	if !tr.Artwork.IsNone() {
+		t.Fatalf("Artwork = %+v, want none", tr.Artwork)
+	}
+}
+
+func TestTrackFromPathColonFilenameKeepsEmbeddedArtwork(t *testing.T) {
+	tr := TrackFromPath("foo:bar.mp3")
+	if tr.Path != "foo:bar.mp3" {
+		t.Fatalf("Path = %q, want colon filename", tr.Path)
+	}
+	if tr.Title != "foo:bar" {
+		t.Fatalf("Title = %q, want %q", tr.Title, "foo:bar")
+	}
+	if tr.Artwork.Path != "foo:bar.mp3" {
+		t.Fatalf("Artwork.Path = %q, want %q", tr.Artwork.Path, "foo:bar.mp3")
+	}
+}
+
+func TestTrackFromPathColonTitleKeepsEmbeddedArtwork(t *testing.T) {
+	tr := TrackFromPath("Artist: Song.mp3")
+	if tr.Path != "Artist: Song.mp3" {
+		t.Fatalf("Path = %q, want colon filename", tr.Path)
+	}
+	if tr.Title != "Artist: Song" {
+		t.Fatalf("Title = %q, want %q", tr.Title, "Artist: Song")
+	}
+	if tr.Artwork.Path != "Artist: Song.mp3" {
+		t.Fatalf("Artwork.Path = %q, want %q", tr.Artwork.Path, "Artist: Song.mp3")
 	}
 }
 

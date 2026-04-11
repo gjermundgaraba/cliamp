@@ -412,16 +412,16 @@ func (m Model) renderControls() string {
 }
 
 func (m Model) renderProviderPill() string {
-	if len(m.providers) <= 1 {
+	if len(m.providers.entries) <= 1 {
 		return ""
 	}
 
 	var pills []string
-	for i, pe := range m.providers {
+	for i, pe := range m.providers.entries {
 		name := pe.Name
-		if m.focus == focusProvPill && i == m.provPillIdx {
+		if m.focus == focusProvPill && i == m.providers.pillIdx {
 			pills = append(pills, activeToggle.Render("["+name+"]"))
-		} else if i == m.provPillIdx {
+		} else if i == m.providers.pillIdx {
 			pills = append(pills, dimStyle.Render("[")+trackStyle.Render(name)+dimStyle.Render("]"))
 		} else {
 			pills = append(pills, dimStyle.Render("["+name+"]"))
@@ -437,7 +437,7 @@ func (m Model) renderProviderPill() string {
 
 func (m Model) renderPlaylistHeader() string {
 	if m.focus == focusProvider {
-		return dimStyle.Render(fmt.Sprintf("── %s Playlists ──", m.provider.Name()))
+		return dimStyle.Render(fmt.Sprintf("── %s Playlists ──", m.providers.active.Name()))
 	}
 
 	var shuffle string
@@ -491,73 +491,73 @@ func (m Model) renderProviderList() string {
 	if visibleBudget <= 0 {
 		return ""
 	}
-	if m.provSignIn {
-		return dimStyle.Render(fmt.Sprintf("  Sign in to %s. Press Enter to continue.", m.provider.Name()))
+	if m.providers.signIn {
+		return dimStyle.Render(fmt.Sprintf("  Sign in to %s. Press Enter to continue.", m.providers.active.Name()))
 	}
-	if m.provLoading {
-		return dimStyle.Render(fmt.Sprintf("  Loading %s...", m.provider.Name()))
+	if m.providers.loading {
+		return dimStyle.Render(fmt.Sprintf("  Loading %s...", m.providers.active.Name()))
 	}
-	if len(m.providerLists) == 0 {
+	if len(m.providers.lists) == 0 {
 		return dimStyle.Render("  No playlists found.\n  Add playlists to ~/.config/cliamp/playlists/")
 	}
 
-	sl, isRadio := m.provider.(provider.SectionedList)
+	sl, isRadio := m.providers.active.(provider.SectionedList)
 	var lines []string
 
-	if m.provSearch.active {
-		lines = append(lines, playlistSelectedStyle.Render("  / "+m.provSearch.query+"_"))
+	if m.providers.search.active {
+		lines = append(lines, playlistSelectedStyle.Render("  / "+m.providers.search.query+"_"))
 
 		if isRadio {
-			if m.provSearch.query == "" {
+			if m.providers.search.query == "" {
 				lines = append(lines, dimStyle.Render("  Type a station name, Enter to search…"))
 			} else {
 				lines = append(lines, dimStyle.Render("  Press Enter to search"))
 			}
 		} else {
-			if m.provSearch.query == "" {
+			if m.providers.search.query == "" {
 				lines = append(lines, dimStyle.Render("  Type to filter…"))
-			} else if len(m.provSearch.results) == 0 {
+			} else if len(m.providers.search.results) == 0 {
 				lines = append(lines, dimStyle.Render("  No matches"))
 			} else {
-				visible := max(0, min(visibleBudget-1, len(m.provSearch.results)))
-				scroll := max(0, m.provSearch.cursor-visible+1)
-				for j := scroll; j < scroll+visible && j < len(m.provSearch.results); j++ {
-					idx := m.provSearch.results[j]
-					p := m.providerLists[idx]
+				visible := max(0, min(visibleBudget-1, len(m.providers.search.results)))
+				scroll := max(0, m.providers.search.cursor-visible+1)
+				for j := scroll; j < scroll+visible && j < len(m.providers.search.results); j++ {
+					idx := m.providers.search.results[j]
+					p := m.providers.lists[idx]
 					prefix, style := "  ", playlistItemStyle
-					if j == m.provSearch.cursor {
+					if j == m.providers.search.cursor {
 						style = playlistSelectedStyle
 						prefix = "> "
 					}
 					lines = append(lines, style.Render(playlistLabel(prefix, p)))
 				}
-				lines = append(lines, dimStyle.Render(fmt.Sprintf("  %d/%d playlists", len(m.provSearch.results), len(m.providerLists))))
+				lines = append(lines, dimStyle.Render(fmt.Sprintf("  %d/%d playlists", len(m.providers.search.results), len(m.providers.lists))))
 			}
 		}
 	} else {
-		scroll := max(0, m.provScroll)
-		if scroll >= len(m.providerLists) {
-			scroll = max(0, len(m.providerLists)-1)
+		scroll := max(0, m.providers.scroll)
+		if scroll >= len(m.providers.lists) {
+			scroll = max(0, len(m.providers.lists)-1)
 		}
-		if m.provCursor < scroll {
-			scroll = m.provCursor
+		if m.providers.cursor < scroll {
+			scroll = m.providers.cursor
 		}
 
 		if isRadio {
-			for scroll < len(m.providerLists)-1 && m.providerRowsFromScroll(sl, scroll, m.provCursor) > visibleBudget {
+			for scroll < len(m.providers.lists)-1 && m.providerRowsFromScroll(sl, scroll, m.providers.cursor) > visibleBudget {
 				scroll++
 			}
-		} else if m.provCursor >= scroll+visibleBudget {
-			scroll = m.provCursor - visibleBudget + 1
+		} else if m.providers.cursor >= scroll+visibleBudget {
+			scroll = m.providers.cursor - visibleBudget + 1
 		}
 
 		prevPrefix := ""
 		if isRadio && scroll > 0 {
-			prevPrefix = sl.IDPrefix(m.providerLists[scroll-1].ID)
+			prevPrefix = sl.IDPrefix(m.providers.lists[scroll-1].ID)
 		}
 
-		for j := scroll; j < len(m.providerLists) && len(lines) < visibleBudget; j++ {
-			p := m.providerLists[j]
+		for j := scroll; j < len(m.providers.lists) && len(lines) < visibleBudget; j++ {
+			p := m.providers.lists[j]
 
 			if isRadio {
 				pfx := sl.IDPrefix(p.ID)
@@ -583,7 +583,7 @@ func (m Model) renderProviderList() string {
 			}
 
 			prefix, style := "  ", playlistItemStyle
-			if j == m.provCursor {
+			if j == m.providers.cursor {
 				style = playlistSelectedStyle
 				prefix = "> "
 			}
@@ -592,7 +592,7 @@ func (m Model) renderProviderList() string {
 	}
 
 	// Loading indicator for catalog batch (never displace selected row if full).
-	if isRadio && m.catalogBatch.loading && len(lines) < visibleBudget {
+	if isRadio && m.providers.catalog.loading && len(lines) < visibleBudget {
 		lines = append(lines, dimStyle.Render("  Loading more stations..."))
 	}
 
@@ -719,7 +719,7 @@ func (m Model) renderJumpOverlay() string {
 func (m Model) renderHelp() string {
 	if m.focus == focusProvider {
 		help := helpKey("↑↓", "Navigate ") + helpKey("Enter", "Load ") + helpKey("/", "Search ")
-		if _, ok := m.provider.(provider.FavoriteToggler); ok {
+		if _, ok := m.providers.active.(provider.FavoriteToggler); ok {
 			help += helpKey("f", "Fav ")
 		}
 		return help + helpKey("Tab", "Focus ") + helpKey("Ctrl+K", "Keys")

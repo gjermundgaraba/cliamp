@@ -1,6 +1,9 @@
 package mediactl
 
 import (
+	"net/url"
+	"path/filepath"
+
 	"github.com/godbus/dbus/v5"
 
 	"cliamp/internal/playback"
@@ -27,6 +30,11 @@ func makeMetadata(t playback.Track) map[string]dbus.Variant {
 	}
 	if t.URL != "" {
 		m["xesam:url"] = dbus.MakeVariant(t.URL)
+	}
+	if t.ArtworkPath != "" {
+		if abs, err := filepath.Abs(t.ArtworkPath); err == nil {
+			m["mpris:artUrl"] = dbus.MakeVariant((&url.URL{Scheme: "file", Path: abs}).String())
+		}
 	}
 	if t.Duration > 0 {
 		m["mpris:length"] = dbus.MakeVariant(t.Duration.Microseconds())

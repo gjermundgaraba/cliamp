@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"cliamp/player"
 	"cliamp/playlist"
 
 	"github.com/kkdai/youtube/v2"
@@ -102,61 +101,45 @@ func Args(args []string) (Result, error) {
 func Remote(urls []string) ([]playlist.Track, error) {
 	var tracks []playlist.Track
 	for _, u := range urls {
-		switch {
-		case playlist.IsXiaoyuzhouEpisode(u):
-			t, err := resolveXiaoyuzhouEpisode(u)
-			if err != nil {
-				return nil, fmt.Errorf("resolving xiaoyuzhou episode %s: %w", u, err)
-			}
-			tracks = append(tracks, t...)
-		case playlist.IsYouTubeMusicURL(u):
-			// YouTube Music requires yt-dlp; the native YouTube API client
-			// does not support music.youtube.com playlists.
-			t, err := resolveYTDL(u)
-			if err != nil {
-				return nil, fmt.Errorf("resolving youtube music %s: %w", u, err)
-			}
-			tracks = append(tracks, t...)
-		case playlist.IsYouTubeURL(u):
-			t, err := resolveYouTube(u)
-			if err != nil {
-				return nil, fmt.Errorf("resolving youtube %s: %w", u, err)
-			}
-			tracks = append(tracks, t...)
-		case playlist.IsYTDL(u):
-			t, err := resolveYTDL(u)
-			if err != nil {
-				return nil, fmt.Errorf("resolving yt-dlp %s: %w", u, err)
-			}
-			tracks = append(tracks, t...)
-		case playlist.IsFeed(u):
-			t, err := resolveFeed(u)
-			if err != nil {
-				return nil, fmt.Errorf("resolving feed %s: %w", u, err)
-			}
-			tracks = append(tracks, t...)
-		case playlist.IsM3U(u):
-			t, err := resolveM3U(u)
-			if err != nil {
-				return nil, fmt.Errorf("resolving m3u %s: %w", u, err)
-			}
-			tracks = append(tracks, t...)
-		case playlist.IsPLS(u):
-			t, err := resolvePLS(u)
-			if err != nil {
-				return nil, fmt.Errorf("resolving pls %s: %w", u, err)
-			}
-			tracks = append(tracks, t...)
-		default:
-			// URL was classified as a feed by content-type sniffing.
-			t, err := resolveFeed(u)
-			if err != nil {
-				return nil, fmt.Errorf("resolving feed %s: %w", u, err)
-			}
-			tracks = append(tracks, t...)
+		res, kind, err := resolveRemoteURL(u)
+		if err != nil {
+			return nil, fmt.Errorf("resolving %s %s: %w", kind, u, err)
 		}
+		tracks = append(tracks, res...)
 	}
 	return tracks, nil
+}
+
+func resolveRemoteURL(rawURL string) ([]playlist.Track, string, error) {
+	switch {
+	case playlist.IsXiaoyuzhouEpisode(rawURL):
+		tracks, err := resolveXiaoyuzhouEpisode(rawURL)
+		return tracks, "xiaoyuzhou episode", err
+	case playlist.IsYouTubeMusicURL(rawURL):
+		// YouTube Music requires yt-dlp; the native YouTube API client
+		// does not support music.youtube.com playlists.
+		tracks, err := resolveYTDL(rawURL)
+		return tracks, "youtube music", err
+	case playlist.IsYouTubeURL(rawURL):
+		tracks, err := resolveYouTube(rawURL)
+		return tracks, "youtube", err
+	case playlist.IsYTDL(rawURL):
+		tracks, err := resolveYTDL(rawURL)
+		return tracks, "yt-dlp", err
+	case playlist.IsFeed(rawURL):
+		tracks, err := resolveFeed(rawURL)
+		return tracks, "feed", err
+	case playlist.IsM3U(rawURL):
+		tracks, err := resolveM3U(rawURL)
+		return tracks, "m3u", err
+	case playlist.IsPLS(rawURL):
+		tracks, err := resolvePLS(rawURL)
+		return tracks, "pls", err
+	default:
+		// URL was classified as a feed by content-type sniffing.
+		tracks, err := resolveFeed(rawURL)
+		return tracks, "feed", err
+	}
 }
 
 // sniffFeedURL does a HEAD request and returns true if the Content-Type
@@ -167,7 +150,7 @@ func sniffFeedURL(rawURL string) bool {
 	// network round-trip to avoid misclassification when CDNs return
 	// unexpected Content-Types for HEAD requests.
 	if u, err := url.Parse(rawURL); err == nil {
-		if player.SupportedExts[strings.ToLower(filepath.Ext(u.Path))] {
+		if playlist.HasSupportedAudioExt(u.Path) {
 			return false
 		}
 	}
@@ -197,7 +180,7 @@ func CollectAudioFiles(path string) ([]string, error) {
 	}
 
 	if !info.IsDir() {
-		if player.SupportedExts[strings.ToLower(filepath.Ext(path))] {
+		if playlist.HasSupportedAudioExt(path) {
 			return []string{path}, nil
 		}
 		return nil, nil
@@ -208,7 +191,7 @@ func CollectAudioFiles(path string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() && player.SupportedExts[strings.ToLower(filepath.Ext(p))] {
+		if !d.IsDir() && playlist.HasSupportedAudioExt(p) {
 			files = append(files, p)
 		}
 		return nil
@@ -261,10 +244,19 @@ func resolveFeed(feedURL string) ([]playlist.Track, error) {
 
 	var rss struct {
 		Channel struct {
-			Title string `xml:"title"`
+			Title       string `xml:"title"`
+			ItunesImage struct {
+				Href string `xml:"href,attr"`
+			} `xml:"http://www.itunes.com/dtds/podcast-1.0.dtd image"`
+			Image struct {
+				URL string `xml:"url"`
+			} `xml:"image"`
 			Items []struct {
-				Title     string `xml:"title"`
-				Duration  string `xml:"http://www.itunes.com/dtds/podcast-1.0.dtd duration"`
+				Title       string `xml:"title"`
+				Duration    string `xml:"http://www.itunes.com/dtds/podcast-1.0.dtd duration"`
+				ItunesImage struct {
+					Href string `xml:"href,attr"`
+				} `xml:"http://www.itunes.com/dtds/podcast-1.0.dtd image"`
 				Enclosure struct {
 					URL  string `xml:"url,attr"`
 					Type string `xml:"type,attr"`
@@ -277,17 +269,32 @@ func resolveFeed(feedURL string) ([]playlist.Track, error) {
 	}
 
 	var tracks []playlist.Track
+	channelImage := rss.Channel.ItunesImage.Href
+	if channelImage == "" {
+		channelImage = rss.Channel.Image.URL
+	}
+	channelImage = resolveFeedResourceURL(resp.Request.URL, channelImage)
 	for _, item := range rss.Channel.Items {
 		if item.Enclosure.URL == "" {
 			continue
 		}
-		tracks = append(tracks, playlist.Track{
+		imageURL := item.ItunesImage.Href
+		if imageURL == "" {
+			imageURL = channelImage
+		} else {
+			imageURL = resolveFeedResourceURL(resp.Request.URL, imageURL)
+		}
+		track := playlist.Track{
 			Path:         item.Enclosure.URL,
 			Title:        item.Title,
 			Artist:       rss.Channel.Title,
 			Stream:       true,
 			DurationSecs: parseItunesDuration(item.Duration),
-		})
+		}
+		if imageURL != "" {
+			track.Artwork = playlist.RemoteArtwork("feed:"+imageURL, imageURL)
+		}
+		tracks = append(tracks, track)
 	}
 	return tracks, nil
 }
@@ -338,6 +345,7 @@ type ytdlFlatEntry struct {
 	Uploader           string  `json:"uploader"`
 	PlaylistUploader   string  `json:"playlist_uploader"`
 	WebpageURLBasename string  `json:"webpage_url_basename"`
+	Thumbnail          string  `json:"thumbnail"`
 	Duration           float64 `json:"duration"`
 }
 
@@ -387,6 +395,7 @@ func resolveYouTube(pageURL string) ([]playlist.Track, error) {
 					Artist:       entry.Author,
 					Stream:       true,
 					DurationSecs: int(entry.Duration.Seconds()),
+					Artwork:      youtubeThumbnailRef(entry.ID, entry.Thumbnails),
 				})
 			}
 			return tracks, nil
@@ -410,6 +419,7 @@ func resolveYouTube(pageURL string) ([]playlist.Track, error) {
 		Artist:       video.Author,
 		Stream:       true,
 		DurationSecs: int(video.Duration.Seconds()),
+		Artwork:      youtubeThumbnailRef(video.ID, video.Thumbnails),
 	}}, nil
 }
 
@@ -499,13 +509,17 @@ func resolveYTDLRange(pageURL string, start, end int) ([]playlist.Track, error) 
 		if artist == "" {
 			artist = e.PlaylistUploader
 		}
-		tracks = append(tracks, playlist.Track{
+		track := playlist.Track{
 			Path:         trackURL,
 			Title:        title,
 			Artist:       artist,
 			Stream:       true,
 			DurationSecs: int(e.Duration),
-		})
+		}
+		if e.Thumbnail != "" {
+			track.Artwork = playlist.RemoteArtwork("ytdl:"+trackURL, e.Thumbnail)
+		}
+		tracks = append(tracks, track)
 	}
 	return tracks, scanner.Err()
 }
@@ -595,4 +609,41 @@ func parseItunesDuration(s string) int {
 // humanizeBasename converts a URL basename like "clr-podcast-467" into "clr podcast 467".
 func humanizeBasename(s string) string {
 	return strings.ReplaceAll(s, "-", " ")
+}
+
+func resolveFeedResourceURL(base *url.URL, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if base == nil {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return base.ResolveReference(u).String()
+}
+
+func youtubeThumbnailRef(videoID string, thumbs youtube.Thumbnails) playlist.ArtworkRef {
+	if videoID == "" {
+		return playlist.NoArtwork()
+	}
+	bestURL := ""
+	bestArea := uint(0)
+	for _, thumb := range thumbs {
+		if thumb.URL == "" {
+			continue
+		}
+		area := thumb.Width * thumb.Height
+		if bestURL == "" || area > bestArea {
+			bestURL = thumb.URL
+			bestArea = area
+		}
+	}
+	if bestURL == "" {
+		bestURL = "https://i.ytimg.com/vi/" + videoID + "/hqdefault.jpg"
+	}
+	return playlist.RemoteArtwork("youtube:"+videoID, bestURL)
 }

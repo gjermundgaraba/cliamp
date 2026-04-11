@@ -5,6 +5,8 @@
 // via type assertions.
 package provider
 
+import "cliamp/playlist"
+
 // ArtistInfo describes an artist in a provider's catalog.
 type ArtistInfo struct {
 	ID         string
@@ -29,8 +31,20 @@ type SortType struct {
 	Label string // e.g. "By Name"
 }
 
-// ProviderMeta key constants used across providers and the UI.
 const (
-	MetaNavidromeID = "navidrome.id"
-	MetaJellyfinID  = "jellyfin.id"
+	KeyRadio     = "radio"
+	KeyLocal     = "local"
+	KeyNavidrome = "navidrome"
+	KeyPlex      = "plex"
+	KeyJellyfin  = "jellyfin"
+	KeySpotify   = "spotify"
+	KeyYT        = "yt"
+	KeyYouTube   = "youtube"
+	KeyYTMusic   = "ytmusic"
 )
+
+type Entry struct {
+	Key      string
+	Name     string
+	Provider playlist.Provider
+}

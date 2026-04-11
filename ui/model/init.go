@@ -9,6 +9,7 @@ import (
 	"cliamp/luaplugin"
 	"cliamp/player"
 	"cliamp/playlist"
+	"cliamp/provider"
 	"cliamp/theme"
 	"cliamp/ui"
 )
@@ -23,7 +24,7 @@ func applyThemeAll(t theme.Theme) {
 // providers is the ordered list of available providers (Radio, Navidrome, Spotify, Jellyfin, etc.).
 // defaultProvider is the config key of the provider to select initially.
 // localProv is an optional direct reference to the local provider for write ops.
-func New(p player.Engine, pl *playlist.Playlist, providers []ProviderEntry, defaultProvider string, localProv playlist.Provider, themes []theme.Theme, luaMgr *luaplugin.Manager, cs ConfigSaver) Model {
+func New(p player.Engine, pl *playlist.Playlist, providers []provider.Entry, defaultProvider string, localProv playlist.Provider, themes []theme.Theme, luaMgr *luaplugin.Manager, cs ConfigSaver) Model {
 	m := Model{
 		player:        p,
 		playlist:      pl,
@@ -34,24 +35,25 @@ func New(p player.Engine, pl *playlist.Playlist, providers []ProviderEntry, defa
 		eqPresetIdx:   -1, // custom until a preset is selected
 		themes:        themes,
 		themeIdx:      -1, // Default (ANSI)
-		localProvider: localProv,
-		providers:     providers,
-		navBrowser:    navBrowserState{},
-		luaMgr:        luaMgr,
+		providers: providerState{
+			local:   localProv,
+			entries: providers,
+		},
+		luaMgr: luaMgr,
 	}
 	m.termTitle = initialTerminalTitleState()
 	// Select the default provider pill.
 	for i, pe := range providers {
 		if pe.Key == defaultProvider {
-			m.provPillIdx = i
-			m.provider = pe.Provider
+			m.providers.pillIdx = i
+			m.providers.active = pe.Provider
 			break
 		}
 	}
 	// Fallback: select first available provider.
-	if m.provider == nil && len(providers) > 0 {
-		m.provPillIdx = 0
-		m.provider = providers[0].Provider
+	if m.providers.active == nil && len(providers) > 0 {
+		m.providers.pillIdx = 0
+		m.providers.active = providers[0].Provider
 	}
 	return m
 }
@@ -61,10 +63,10 @@ func New(p player.Engine, pl *playlist.Playlist, providers []ProviderEntry, defa
 // (browse) and "F" (search) which should work regardless of the active provider.
 func (m *Model) findProviderWith(check func(playlist.Provider) bool) playlist.Provider {
 	// Prefer the active provider if it matches.
-	if check(m.provider) {
-		return m.provider
+	if check(m.providers.active) {
+		return m.providers.active
 	}
-	for _, pe := range m.providers {
+	for _, pe := range m.providers.entries {
 		if pe.Provider != nil && check(pe.Provider) {
 			return pe.Provider
 		}
@@ -138,7 +140,7 @@ func (m *Model) SetResume(path string, secs int) {
 
 // ResumePlaylist loads a playlist into the model for session resume.
 func (m *Model) ResumePlaylist(name string, tracks []playlist.Track) {
-	m.playlist.Replace(tracks)
+	m.replacePlaylist(tracks)
 	m.loadedPlaylist = name
 }
 
@@ -162,8 +164,8 @@ func (m Model) Init() tea.Cmd {
 		m.luaMgr.Emit(luaplugin.EventAppStart, nil)
 	}
 	cmds := []tea.Cmd{tickCmd(), func() tea.Msg { return tea.RequestWindowSize() }}
-	if m.provider != nil {
-		cmds = append(cmds, fetchPlaylistsCmd(m.provider))
+	if m.providers.active != nil {
+		cmds = append(cmds, fetchPlaylistsCmd(m.providers.active))
 	}
 	if len(m.pendingURLs) > 0 {
 		cmds = append(cmds, resolveRemoteCmd(m.pendingURLs, m.autoPlay))

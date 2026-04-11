@@ -278,3 +278,20 @@ type terminalTitleState struct {
 	introOffset int
 	introTick   int
 }
+
+type providerState struct {
+	active  playlist.Provider
+	local   playlist.Provider
+	entries []provider.Entry
+	pillIdx int
+
+	lists   []playlist.PlaylistInfo
+	cursor  int
+	scroll  int
+	loading bool
+	signIn  bool
+
+	search  provSearchState
+	catalog catalogBatchState
+	nav     navBrowserState
+}

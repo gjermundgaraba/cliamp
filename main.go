@@ -25,6 +25,7 @@ import (
 	"cliamp/mediactl"
 	"cliamp/player"
 	"cliamp/playlist"
+	"cliamp/provider"
 	"cliamp/resolve"
 	"cliamp/theme"
 	"cliamp/ui"
@@ -45,10 +46,10 @@ func run(overrides config.Overrides, positional []string) error {
 	radioProv := radio.New()
 	localProv := local.New()
 
-	var providers []model.ProviderEntry
-	providers = append(providers, model.ProviderEntry{Key: "radio", Name: "Radio", Provider: radioProv})
+	var providers []provider.Entry
+	providers = append(providers, provider.Entry{Key: provider.KeyRadio, Name: provider.DisplayName(provider.KeyRadio), Provider: radioProv})
 	if localProv != nil {
-		providers = append(providers, model.ProviderEntry{Key: "local", Name: "Local", Provider: localProv})
+		providers = append(providers, provider.Entry{Key: provider.KeyLocal, Name: provider.DisplayName(provider.KeyLocal), Provider: localProv})
 	}
 
 	var navClient *navidrome.NavidromeClient
@@ -58,28 +59,28 @@ func run(overrides config.Overrides, positional []string) error {
 		navClient = c
 	}
 	if navClient != nil {
-		providers = append(providers, model.ProviderEntry{Key: "navidrome", Name: "Navidrome", Provider: navClient})
+		providers = append(providers, provider.Entry{Key: provider.KeyNavidrome, Name: provider.DisplayName(provider.KeyNavidrome), Provider: navClient})
 	}
 
 	if plexProv := plex.NewFromConfig(cfg.Plex); plexProv != nil {
-		providers = append(providers, model.ProviderEntry{Key: "plex", Name: "Plex", Provider: plexProv})
+		providers = append(providers, provider.Entry{Key: provider.KeyPlex, Name: provider.DisplayName(provider.KeyPlex), Provider: plexProv})
 	}
 
 	if jellyProv := jellyfin.NewFromConfig(cfg.Jellyfin); jellyProv != nil {
-		providers = append(providers, model.ProviderEntry{Key: "jellyfin", Name: "Jellyfin", Provider: jellyProv})
+		providers = append(providers, provider.Entry{Key: provider.KeyJellyfin, Name: provider.DisplayName(provider.KeyJellyfin), Provider: jellyProv})
 	}
 
 	var spotifyProv *spotify.SpotifyProvider
 	if cfg.Spotify.IsSet() {
 		spotifyProv = spotify.New(nil, cfg.Spotify.ClientID)
-		providers = append(providers, model.ProviderEntry{Key: "spotify", Name: "Spotify", Provider: spotifyProv})
+		providers = append(providers, provider.Entry{Key: provider.KeySpotify, Name: provider.DisplayName(provider.KeySpotify), Provider: spotifyProv})
 	}
 
 	var ytProviders ytmusic.Providers
 	ytWanted := cfg.YouTubeMusic.IsSetOrFallback(ytmusic.FallbackCredentials)
 	if !ytWanted {
 		switch cfg.Provider {
-		case "yt", "youtube", "ytmusic":
+		case provider.KeyYT, provider.KeyYouTube, provider.KeyYTMusic:
 			ytWanted = true
 		}
 	}
@@ -107,9 +108,9 @@ func run(overrides config.Overrides, positional []string) error {
 			if player.YTDLPAvailable() {
 				ytProviders = ytmusic.New(nil, ytClientID, ytClientSecret, cfg.YouTubeMusic.CookiesFrom != "")
 				providers = append(providers,
-					model.ProviderEntry{Key: "yt", Name: "YouTube (All)", Provider: ytProviders.All},
-					model.ProviderEntry{Key: "youtube", Name: "YouTube", Provider: ytProviders.Video},
-					model.ProviderEntry{Key: "ytmusic", Name: "YouTube Music", Provider: ytProviders.Music},
+					provider.Entry{Key: provider.KeyYT, Name: provider.DisplayName(provider.KeyYT), Provider: ytProviders.All},
+					provider.Entry{Key: provider.KeyYouTube, Name: provider.DisplayName(provider.KeyYouTube), Provider: ytProviders.Video},
+					provider.Entry{Key: provider.KeyYTMusic, Name: provider.DisplayName(provider.KeyYTMusic), Provider: ytProviders.Music},
 				)
 			}
 		}
@@ -141,10 +142,10 @@ func run(overrides config.Overrides, positional []string) error {
 
 	defaultProvider := cfg.Provider
 	if defaultProvider == "" {
-		defaultProvider = "radio"
+		defaultProvider = provider.KeyRadio
 	}
 
-	defaultRadio := len(positional) == 0 && defaultProvider == "radio"
+	defaultRadio := len(positional) == 0 && defaultProvider == provider.KeyRadio
 
 	pl := playlist.New()
 	if cfg.Playlist != "" && localProv != nil {
@@ -280,7 +281,7 @@ func run(overrides config.Overrides, positional []string) error {
 
 	prog := tea.NewProgram(m)
 
-	svc, svcErr := wireMediaCtl(prog)
+	svc, svcErr := wireMediaCtl(prog, cfg.MediaControls)
 	if svcErr == nil && svc != nil {
 		defer svc.Close()
 	}
@@ -331,7 +332,10 @@ func run(overrides config.Overrides, positional []string) error {
 	return nil
 }
 
-func wireMediaCtl(prog *tea.Program) (*mediactl.Service, error) {
+func wireMediaCtl(prog *tea.Program, enabled bool) (*mediactl.Service, error) {
+	if !enabled {
+		return nil, nil
+	}
 	svc, err := mediactl.New(prog.Send)
 	if err != nil || svc == nil {
 		return svc, err

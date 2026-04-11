@@ -39,6 +39,7 @@ interfaces are defined in `provider/interfaces.go`.
 | `ArtistBrowser` | Hierarchical artist browsing | `Artists()`, `ArtistAlbums(id)` |
 | `AlbumBrowser` | Paginated album browsing with sort | `AlbumList(sort, offset, size)`, `AlbumSortTypes()` |
 | `AlbumTrackLoader` | Album track listing | `AlbumTracks(albumID)` |
+| `ArtworkResolver` | Lazy artwork recovery for copied/saved tracks | `ResolveArtwork(ctx, track)` |
 | `Scrobbler` | Playback reporting | `Scrobble(track, submission)` |
 | `PlaylistWriter` | Add track to playlist | `AddTrackToPlaylist(ctx, playlistID, track)` |
 | `PlaylistCreator` | Create new playlist | `CreatePlaylist(ctx, name)` |
@@ -109,16 +110,20 @@ When building `playlist.Track` values:
   For custom URI schemes (e.g. `spotify:track:xxx`), implement `CustomStreamer`.
 - **`Stream: true`**: set this for HTTP URLs so the player uses the streaming
   pipeline.
-- **`ProviderMeta`**: attach provider-specific metadata as a string map with
-  namespaced keys. This is used for features like scrobbling:
+- **`Artwork`**: attach a `playlist.ArtworkRef` directly on the track. The
+  materializer will download and cache the image for media controls.
+- **`Owner`**: set the provider key and provider-native track ID. Artwork
+  resolution and playback reporting route through this owner after tracks are
+  reloaded from another source (for example, a local TOML playlist).
 
 ```go
 playlist.Track{
-    Path:         "https://my-server/stream/123",
-    Title:        "Song Title",
-    Artist:       "Artist Name",
-    Stream:       true,
-    ProviderMeta: map[string]string{"jellyfin.id": "123"},
+    Path:    "https://my-server/stream/123",
+    Title:   "Song Title",
+    Artist:  "Artist Name",
+    Stream:  true,
+    Artwork: playlist.RemoteArtwork("jellyfin:123", "https://my-server/Items/123/Images/Primary"),
+    Owner:   playlist.TrackOwner{Provider: "jellyfin", ID: "123"},
 }
 ```
 
@@ -148,8 +153,10 @@ Wire up the provider in the `run()` function in `main.go`:
 ```go
 if cfg.Jellyfin.URL != "" && cfg.Jellyfin.Token != "" {
     jfProv := jellyfin.New(cfg.Jellyfin.URL, cfg.Jellyfin.Token)
-    providers = append(providers, ui.ProviderEntry{
-        Key: "jellyfin", Name: "Jellyfin", Provider: jfProv,
+    providers = append(providers, provider.Entry{
+        Key: provider.KeyJellyfin,
+        Name: provider.DisplayName(provider.KeyJellyfin),
+        Provider: jfProv,
     })
 }
 ```

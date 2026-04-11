@@ -229,6 +229,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if newTrack, idx := m.playlist.Current(); idx >= 0 {
 				m.nowPlaying(newTrack)
 			}
+			if cmd := m.refreshCurrentArtwork(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			cmds = append(cmds, m.preloadNext())
 			m.notifyAll()
 		}
@@ -270,12 +273,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case []playlist.PlaylistInfo:
-		m.providerLists = msg
-		m.provLoading = false
+		m.providers.lists = msg
+		m.providers.loading = false
 		// Start loading catalog when the provider supports lazy catalog loading.
-		if loader, ok := m.provider.(provider.CatalogLoader); ok && !m.catalogBatch.loading && !m.catalogBatch.done {
-			m.catalogBatch.loading = true
-			return m, fetchCatalogBatchCmd(loader, m.catalogBatch.offset, catalogBatchSize)
+		if loader, ok := m.providers.active.(provider.CatalogLoader); ok && !m.providers.catalog.loading && !m.providers.catalog.done {
+			m.providers.catalog.loading = true
+			return m, fetchCatalogBatchCmd(loader, m.providers.catalog.offset, catalogBatchSize)
 		}
 		return m, nil
 
@@ -286,11 +289,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.player.ClearPreload()
 		}
 		m.resetYTDLBatch()
-		m.playlist.Replace(msg)
+		m.replacePlaylist(msg)
 		m.plCursor = 0
 		m.plScroll = 0
 		m.focus = focusPlaylist
-		m.provLoading = false
+		m.providers.loading = false
 		if m.playlist.Len() > 0 && !wasPlaying {
 			cmd := m.playCurrentTrack()
 			m.notifyAll()
@@ -299,72 +302,72 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case navArtistsLoadedMsg:
-		m.navBrowser.artists = []provider.ArtistInfo(msg)
-		m.navBrowser.loading = false
-		m.navBrowser.cursor = 0
-		m.navBrowser.scroll = 0
+		m.providers.nav.artists = []provider.ArtistInfo(msg)
+		m.providers.nav.loading = false
+		m.providers.nav.cursor = 0
+		m.providers.nav.scroll = 0
 		return m, nil
 
 	case navAlbumsLoadedMsg:
 		if msg.offset == 0 {
 			// Fresh load (new sort or drill-in): replace the list.
-			m.navBrowser.albums = msg.albums
-			m.navBrowser.albumDone = false
+			m.providers.nav.albums = msg.albums
+			m.providers.nav.albumDone = false
 		} else {
 			// Lazy-load page: append.
-			m.navBrowser.albums = append(m.navBrowser.albums, msg.albums...)
+			m.providers.nav.albums = append(m.providers.nav.albums, msg.albums...)
 		}
 		if msg.isLast {
-			m.navBrowser.albumDone = true
+			m.providers.nav.albumDone = true
 		}
-		m.navBrowser.albumLoading = false
+		m.providers.nav.albumLoading = false
 		if msg.offset == 0 {
-			m.navBrowser.cursor = 0
-			m.navBrowser.scroll = 0
+			m.providers.nav.cursor = 0
+			m.providers.nav.scroll = 0
 		}
 		// If we just loaded the first page and it was a full menu → list transition,
 		// also clear the general loading flag.
-		m.navBrowser.loading = false
+		m.providers.nav.loading = false
 		return m, nil
 
 	case navTracksLoadedMsg:
-		m.navBrowser.tracks = []playlist.Track(msg)
-		m.navBrowser.loading = false
-		m.navBrowser.cursor = 0
-		m.navBrowser.scroll = 0
-		m.navBrowser.screen = navBrowseScreenTracks
+		m.providers.nav.tracks = []playlist.Track(msg)
+		m.providers.nav.loading = false
+		m.providers.nav.cursor = 0
+		m.providers.nav.scroll = 0
+		m.providers.nav.screen = navBrowseScreenTracks
 		return m, nil
 
 	case catalogBatchMsg:
-		m.catalogBatch.loading = false
+		m.providers.catalog.loading = false
 		if msg.err != nil {
-			m.catalogBatch.done = true
+			m.providers.catalog.done = true
 			m.status.Show("Catalog load failed", statusTTLDefault)
 			return m, nil
 		}
 		if msg.added == 0 {
-			m.catalogBatch.done = true
+			m.providers.catalog.done = true
 			return m, nil
 		}
-		if lists, err := m.provider.Playlists(); err == nil {
-			m.providerLists = lists
+		if lists, err := m.providers.active.Playlists(); err == nil {
+			m.providers.lists = lists
 		}
-		m.catalogBatch.offset += msg.added
+		m.providers.catalog.offset += msg.added
 		if msg.added < catalogBatchSize {
-			m.catalogBatch.done = true
+			m.providers.catalog.done = true
 		}
 		return m, nil
 
 	case catalogSearchMsg:
-		m.provLoading = false
+		m.providers.loading = false
 		if msg.err != nil {
 			m.status.Show("Search failed", statusTTLDefault)
 		} else {
-			if lists, err := m.provider.Playlists(); err == nil {
-				m.providerLists = lists
+			if lists, err := m.providers.active.Playlists(); err == nil {
+				m.providers.lists = lists
 			}
-			m.provCursor = 0
-			m.provScroll = 0
+			m.providers.cursor = 0
+			m.providers.scroll = 0
 			if msg.count == 0 {
 				m.status.Show("No stations found", statusTTLDefault)
 			}
@@ -382,13 +385,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status.Showf(statusTTLBatch, "Radio batch load failed: %v", msg.err)
 			return m, nil
 		}
-		if len(msg.tracks) == 0 {
+		tracks := msg.tracks
+		if len(tracks) == 0 {
 			m.ytdlBatch.done = true
 			return m, nil
 		}
-		m.playlist.Add(msg.tracks...)
-		m.ytdlBatch.offset += len(msg.tracks)
-		if len(msg.tracks) < ytdlBatchSize {
+		m.playlist.Add(tracks...)
+		m.ytdlBatch.offset += len(tracks)
+		if len(tracks) < ytdlBatchSize {
 			m.ytdlBatch.done = true
 			return m, nil
 		}
@@ -398,27 +402,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case feedTrackResolvedMsg:
 		m.feedLoading = false
-		if len(msg.tracks) == 0 {
+		tracks := msg.tracks
+		if len(tracks) == 0 {
 			m.status.Show("No episodes found in feed.", statusTTLDefault)
 			return m, nil
 		}
-		m.playlist.Replace(msg.tracks)
+		m.replacePlaylist(tracks)
 		m.plCursor = 0
 		m.plScroll = 0
-		m.status.Showf(statusTTLDefault, "Loaded %d episode(s)", len(msg.tracks))
+		m.status.Showf(statusTTLDefault, "Loaded %d episode(s)", len(tracks))
 		playCmd := m.playCurrentTrack()
 		m.notifyAll()
 		return m, playCmd
 
 	case feedsLoadedMsg:
 		m.feedLoading = false
-		if len(msg.tracks) > 0 {
-			m.playlist.Add(msg.tracks...)
-			m.status.Showf(statusTTLDefault, "Loaded %d track(s)", len(msg.tracks))
+		tracks := msg.tracks
+		if len(tracks) > 0 {
+			m.playlist.Add(tracks...)
+			m.status.Showf(statusTTLDefault, "Loaded %d track(s)", len(tracks))
 		} else {
 			m.status.Show("No tracks found at URL.", statusTTLDefault)
 		}
-		if len(msg.tracks) > 0 {
+		if len(tracks) > 0 {
 			// Set up incremental loading for YouTube Radio playlists.
 			// The source URLs are carried in the message so we don't
 			// need to re-scan pendingURLs (which misses interactive loads).
@@ -438,16 +444,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case netSearchLoadedMsg:
-		if len(msg) == 0 {
+		tracks := msg.tracks
+		if len(tracks) == 0 {
 			m.status.Show("No tracks found online.", statusTTLDefault)
 			return m, nil
 		}
 		startIdx := m.playlist.Len()
-		m.playlist.Add(msg...)
+		m.playlist.Add(tracks...)
 		for i := startIdx; i < m.playlist.Len(); i++ {
 			m.playlist.Queue(i)
 		}
-		m.status.Showf(statusTTLDefault, "Added to Queue: %s", msg[0].DisplayName())
+		m.status.Showf(statusTTLDefault, "Added to Queue: %s", tracks[0].DisplayName())
 		if !m.player.IsPlaying() {
 			cmd := m.playCurrentTrack()
 			m.notifyAll()
@@ -473,7 +480,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.player.Stop()
 			m.player.ClearPreload()
 			m.resetYTDLBatch()
-			m.playlist.Replace(msg.tracks)
+			m.replacePlaylist(msg.tracks)
 			m.plCursor = 0
 			m.plScroll = 0
 		} else {
@@ -530,15 +537,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notifyAll()
 		return m, cmd
 
+	case artworkResolvedMsg:
+		m.applyArtworkResolved(msg)
+		return m, nil
+
 	case error:
 		if errors.Is(msg, playlist.ErrNeedsAuth) {
-			m.provLoading = false
-			m.provSignIn = true
+			m.providers.loading = false
+			m.providers.signIn = true
 			m.err = nil
 			return m, nil
 		}
 		m.err = msg
-		m.provLoading = false
+		m.providers.loading = false
 		m.feedLoading = false
 		m.buffering = false
 		return m, nil
@@ -591,13 +602,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case provAuthDoneMsg:
 		if msg.err != nil {
 			m.err = msg.err
-			m.provLoading = false
-			m.provSignIn = false
+			m.providers.loading = false
+			m.providers.signIn = false
 			return m, nil
 		}
-		m.provSignIn = false
-		m.provLoading = true
-		return m, fetchPlaylistsCmd(m.provider)
+		m.providers.signIn = false
+		m.providers.loading = true
+		return m, fetchPlaylistsCmd(m.providers.active)
 
 	case devicesListedMsg:
 		m.devicePicker.loading = false
@@ -621,8 +632,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case attachNotifierMsg:
-		m.attachNotifier(msg.notifier)
-		return m, nil
+		return m, m.attachNotifier(msg.notifier)
 
 	case playback.PlayPauseMsg:
 		cmd := m.togglePlayPause()
@@ -669,6 +679,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case playback.StopMsg:
 		m.player.Stop()
+		m.artwork.session.Clear()
 		m.notifyAll()
 		return m, nil
 
@@ -708,14 +719,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notifyAll()
 		return m, nil
 	case ipc.LoadMsg:
-		tracks, err := m.localProvider.Tracks(msg.Playlist)
+		tracks, err := m.providers.local.Tracks(msg.Playlist)
 		if err != nil {
 			if msg.Reply != nil {
 				msg.Reply <- ipc.Response{OK: false, Error: fmt.Sprintf("playlist %q: %v", msg.Playlist, err)}
 			}
 			return m, nil
 		}
-		m.playlist.Replace(tracks)
+		m.replacePlaylist(tracks)
 		m.loadedPlaylist = msg.Playlist
 		cmd := m.playCurrentTrack()
 		m.notifyAll()
@@ -724,7 +735,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	case ipc.QueueMsg:
-		t := playlist.Track{Path: msg.Path, Title: msg.Path}
+		t := playlist.TrackFromPath(msg.Path)
 		m.playlist.Add(t)
 		m.notifyAll()
 		return m, nil

@@ -4,6 +4,7 @@ package model
 import (
 	"time"
 
+	"cliamp/internal/artwork"
 	"cliamp/internal/playback"
 	"cliamp/luaplugin"
 	"cliamp/player"
@@ -110,13 +111,6 @@ const (
 	navBrowseScreenTracks                            // final song list in any mode
 )
 
-// ProviderEntry pairs a display name with a key and provider implementation.
-type ProviderEntry struct {
-	Key      string            // config key: "radio", "navidrome", "spotify"
-	Name     string            // display name: "Radio", "Navidrome", "Spotify"
-	Provider playlist.Provider // nil if not configured
-}
-
 // statusTTL* constants define how long a status message is shown.
 const (
 	statusTTLShort   statusTTL = statusTTL(2 * time.Second)         // brief confirmations
@@ -152,23 +146,12 @@ type Model struct {
 	width           int
 	height          int
 
-	// Provider state
-	provider      playlist.Provider
-	localProvider playlist.Provider // local playlist provider for file-based playlist management (always available)
-	providerLists []playlist.PlaylistInfo
-	provCursor    int
-	provScroll    int
-	provLoading   bool
-	provSignIn    bool            // true when provider needs interactive sign-in
-	providers     []ProviderEntry // all available providers
-	provPillIdx   int             // selected pill index
-	eqPresetIdx   int             // -1 = custom, 0+ = index into eqPresets
-	eqCustomLabel string          // non-empty = plugin-defined preset label (shown instead of "Custom")
+	eqPresetIdx   int
+	eqCustomLabel string
 
 	// Overlay / feature state (see state.go for struct definitions)
 	search         searchState
 	netSearch      netSearchState
-	provSearch     provSearchState
 	seek           seekState
 	themePicker    themePickerState
 	lyrics         lyricsState
@@ -177,8 +160,6 @@ type Model struct {
 	plManager      plManagerState
 	spotSearch     spotSearchState
 	fileBrowser    fileBrowserState
-	navBrowser     navBrowserState
-	catalogBatch   catalogBatchState
 	ytdlBatch      ytdlBatchState
 	reconnect      reconnectState
 	save           saveState
@@ -228,6 +209,9 @@ type Model struct {
 	streamTitle string
 
 	notifier playback.Notifier
+	artwork  artworkState
+
+	providers providerState
 
 	// Lua plugin manager (nil if no plugins loaded)
 	luaMgr *luaplugin.Manager
@@ -256,6 +240,11 @@ type Model struct {
 
 }
 
+type artworkState struct {
+	materializer *artwork.Materializer
+	session      artworkSession
+}
+
 func (m Model) activeScreen() topLevelScreen {
 	switch {
 	case m.keymap.visible:
@@ -266,7 +255,7 @@ func (m Model) activeScreen() topLevelScreen {
 		return screenDevicePicker
 	case m.fileBrowser.visible:
 		return screenFileBrowser
-	case m.navBrowser.visible:
+	case m.providers.nav.visible:
 		return screenNavBrowser
 	case m.plManager.visible:
 		return screenPlaylistManager

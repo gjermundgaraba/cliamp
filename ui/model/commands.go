@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"cliamp/internal/artwork"
 	"cliamp/internal/playback"
 	"cliamp/lyrics"
 	"cliamp/player"
@@ -58,7 +59,9 @@ type lyricsLoadedMsg struct {
 }
 
 // netSearchLoadedMsg carries tracks dynamically searched from the internet.
-type netSearchLoadedMsg []playlist.Track
+type netSearchLoadedMsg struct {
+	tracks []playlist.Track
+}
 
 // streamPlayedMsg signals that async stream Play() completed.
 type streamPlayedMsg struct{ err error }
@@ -82,6 +85,14 @@ type ytdlBatchMsg struct {
 	gen    uint64 // batch session generation
 	tracks []playlist.Track
 	err    error
+}
+
+type artworkResolvedMsg struct {
+	index int
+	gen   uint64
+	ref   playlist.ArtworkRef
+	path  string
+	err   error
 }
 
 // ytdlSavedMsg signals that an async yt-dlp download-to-disk completed.
@@ -185,7 +196,7 @@ func fetchNetSearchCmd(query string) tea.Cmd {
 		if err != nil {
 			return err
 		}
-		return netSearchLoadedMsg(tracks)
+		return netSearchLoadedMsg{tracks: tracks}
 	}
 }
 
@@ -212,6 +223,19 @@ func preloadLocalCmd(p player.Engine, path string, knownDuration time.Duration) 
 func playYTDLStreamCmd(p player.Engine, pageURL string, knownDuration time.Duration) tea.Cmd {
 	return func() tea.Msg {
 		return streamPlayedMsg{err: p.PlayYTDL(pageURL, knownDuration)}
+	}
+}
+
+func resolveArtworkCmd(materializer *artwork.Materializer, resolveRef func(context.Context, playlist.Track) (playlist.ArtworkRef, error), index int, gen uint64, track playlist.Track) tea.Cmd {
+	if materializer == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+
+		resolved, err := artwork.ResolveTrack(ctx, materializer, track, resolveRef)
+		return artworkResolvedMsg{index: index, gen: gen, ref: resolved.Ref, path: resolved.Path, err: err}
 	}
 }
 

@@ -41,6 +41,9 @@ func TestAttachNotifierPublishesCurrentPlaybackState(t *testing.T) {
 	if nextModel.notifier != notifier {
 		t.Fatal("notifier was not attached to model")
 	}
+	if nextModel.artwork.materializer == nil {
+		t.Fatal("artwork materializer was not initialized when notifier attached")
+	}
 	if len(notifier.updates) != 1 {
 		t.Fatalf("notifier update count = %d, want 1", len(notifier.updates))
 	}

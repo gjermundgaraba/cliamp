@@ -22,6 +22,9 @@ shuffle = false
 # Start with mono output (L+R downmix)
 mono = false
 
+# Publish OS media controls / media keys integration
+media_controls = true
+
 # Shift+Left/Right seek jump in seconds
 seek_large_step_sec = 30
 
@@ -46,6 +49,8 @@ compact = false
 theme = "Tokyo Night"
 
 ```
+
+Set `media_controls = false` to disable OS media controls entirely. On Linux this disables MPRIS registration; on macOS it disables Control Centre / Lock Screen integration and hardware media-key handling.
 
 ## Default Provider
 

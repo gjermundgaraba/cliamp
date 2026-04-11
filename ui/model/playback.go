@@ -14,6 +14,7 @@ func (m *Model) nextTrack() tea.Cmd {
 	track, ok := m.playlist.Next()
 	if !ok {
 		m.player.Stop()
+		m.artwork.session.Clear()
 		return nil
 	}
 	m.plCursor = m.playlist.Index()
@@ -59,6 +60,7 @@ func (m *Model) playCurrentTrack() tea.Cmd {
 // yt-dlp URLs are streamed via a piped yt-dlp | ffmpeg chain for instant playback.
 func (m *Model) playTrack(track playlist.Track) tea.Cmd {
 	if track.Feed || playlist.IsFeed(track.Path) {
+		m.artwork.session.Clear()
 		m.feedLoading = true
 		m.status.Show("Loading feed...", statusTTLLong)
 		return resolveFeedTrackCmd(track.Path)
@@ -82,6 +84,7 @@ func (m *Model) playTrack(track playlist.Track) tea.Cmd {
 		m.lyrics.query = track.Artist + "\n" + track.Title
 		fetchCmd = fetchLyricsCmd(track.Artist, track.Title)
 	}
+	artworkCmd := m.refreshCurrentArtwork()
 
 	// Stream yt-dlp URLs (YouTube, SoundCloud, Bandcamp, etc.) via pipe chain.
 	if playlist.IsYTDL(track.Path) {
@@ -89,10 +92,7 @@ func (m *Model) playTrack(track playlist.Track) tea.Cmd {
 		m.bufferingAt = time.Now()
 		m.err = nil
 		dur := time.Duration(track.DurationSecs) * time.Second
-		if fetchCmd != nil {
-			return tea.Batch(playYTDLStreamCmd(m.player, track.Path, dur), fetchCmd)
-		}
-		return playYTDLStreamCmd(m.player, track.Path, dur)
+		return tea.Batch(playYTDLStreamCmd(m.player, track.Path, dur), artworkCmd, fetchCmd)
 	}
 	// Fire now-playing notification for Navidrome tracks.
 	m.nowPlaying(track)
@@ -101,7 +101,7 @@ func (m *Model) playTrack(track playlist.Track) tea.Cmd {
 		m.buffering = true
 		m.bufferingAt = time.Now()
 		m.err = nil
-		return tea.Batch(playStreamCmd(m.player, track.Path, dur), fetchCmd)
+		return tea.Batch(playStreamCmd(m.player, track.Path, dur), artworkCmd, fetchCmd)
 	}
 	if err := m.player.Play(track.Path, dur); err != nil {
 		m.err = err
@@ -110,10 +110,7 @@ func (m *Model) playTrack(track playlist.Track) tea.Cmd {
 		m.applyResume()
 	}
 
-	if fetchCmd != nil {
-		return tea.Batch(m.preloadNext(), fetchCmd)
-	}
-	return m.preloadNext()
+	return tea.Batch(m.preloadNext(), artworkCmd, fetchCmd)
 }
 
 // togglePlayPause starts playback if stopped, or toggles pause if playing.

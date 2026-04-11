@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cliamp/playlist"
+	"cliamp/provider"
 
 	"google.golang.org/api/youtube/v3"
 )
@@ -346,6 +347,8 @@ func (b *baseProvider) tracks(playlistID string) ([]playlist.Track, error) {
 			Artist:       cleanChannelName(it.channel),
 			Stream:       false,
 			DurationSecs: durations[it.videoID],
+			Artwork:      youtubeArtworkRef(it.videoID),
+			Owner:        playlist.TrackOwner{Provider: provider.KeyYT, ID: it.videoID},
 		})
 	}
 
@@ -525,6 +528,13 @@ func (p *YouTubeAllProvider) Playlists() ([]playlist.PlaylistInfo, error) {
 	b.mu.Unlock()
 
 	return all, nil
+}
+
+func youtubeArtworkRef(videoID string) playlist.ArtworkRef {
+	if videoID == "" {
+		return playlist.NoArtwork()
+	}
+	return playlist.RemoteArtwork("youtube:"+videoID, "https://i.ytimg.com/vi/"+videoID+"/hqdefault.jpg")
 }
 
 // ─── Constructor ───────────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 package mediactl
 
 import (
+	"net/url"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -69,5 +71,37 @@ func TestMakeMetadataOmitsEmptyOptionalFields(t *testing.T) {
 		if _, ok := got[key]; ok {
 			t.Fatalf("metadata unexpectedly included %q", key)
 		}
+	}
+}
+
+func TestMakeMetadataAddsArtworkFileURL(t *testing.T) {
+	track := playback.Track{ArtworkPath: "/tmp/cover art.png"}
+
+	got := makeMetadata(track)
+
+	value, ok := got["mpris:artUrl"]
+	if !ok {
+		t.Fatal("metadata missing mpris:artUrl")
+	}
+
+	raw, ok := value.Value().(string)
+	if !ok {
+		t.Fatalf("mpris:artUrl value = %#v, want string", value.Value())
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("url.Parse() error = %v", err)
+	}
+	if parsed.Scheme != "file" {
+		t.Fatalf("artwork URL scheme = %q, want file", parsed.Scheme)
+	}
+
+	abs, err := filepath.Abs(track.ArtworkPath)
+	if err != nil {
+		t.Fatalf("filepath.Abs() error = %v", err)
+	}
+	if parsed.Path != abs {
+		t.Fatalf("artwork URL path = %q, want %q", parsed.Path, abs)
 	}
 }

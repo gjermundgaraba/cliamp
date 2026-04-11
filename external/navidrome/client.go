@@ -1,6 +1,7 @@
 package navidrome
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
@@ -25,6 +26,7 @@ var (
 	_ provider.AlbumBrowser     = (*NavidromeClient)(nil)
 	_ provider.AlbumTrackLoader = (*NavidromeClient)(nil)
 	_ provider.AlbumSortSaver   = (*NavidromeClient)(nil)
+	_ provider.ArtworkResolver  = (*NavidromeClient)(nil)
 	_ provider.PlaybackReporter = (*NavidromeClient)(nil)
 )
 
@@ -425,7 +427,8 @@ func (c *NavidromeClient) songToTrack(s subsonicSong) playlist.Track {
 		Genre:        s.Genre,
 		Stream:       true,
 		DurationSecs: s.Duration,
-		ProviderMeta: map[string]string{provider.MetaNavidromeID: s.ID},
+		Artwork:      playlist.RemoteArtwork("navidrome:"+s.ID, c.coverArtURL(s.ID)),
+		Owner:        playlist.TrackOwner{Provider: provider.KeyNavidrome, ID: s.ID},
 	}
 }
 
@@ -461,16 +464,27 @@ func (c *NavidromeClient) streamURL(id string) string {
 	return c.buildURL("stream", url.Values{"id": {id}, "format": {"raw"}})
 }
 
+func (c *NavidromeClient) coverArtURL(id string) string {
+	return c.buildURL("getCoverArt", url.Values{"id": {id}})
+}
+
 func (c *NavidromeClient) CanReportPlayback(track playlist.Track) bool {
-	return !c.scrobbleDisabled && track.Meta(provider.MetaNavidromeID) != ""
+	return !c.scrobbleDisabled && track.Owner.Provider == provider.KeyNavidrome && track.Owner.ID != ""
+}
+
+func (c *NavidromeClient) ResolveArtwork(_ context.Context, track playlist.Track) (playlist.ArtworkRef, error) {
+	if track.Owner.Provider != provider.KeyNavidrome || track.Owner.ID == "" {
+		return playlist.NoArtwork(), nil
+	}
+	return playlist.RemoteArtwork("navidrome:"+track.Owner.ID, c.coverArtURL(track.Owner.ID)), nil
 }
 
 func (c *NavidromeClient) ReportNowPlaying(track playlist.Track, _ time.Duration, _ bool) {
-	c.scrobble(track.Meta(provider.MetaNavidromeID), false)
+	c.scrobble(track.Owner.ID, false)
 }
 
 func (c *NavidromeClient) ReportScrobble(track playlist.Track, _, _ time.Duration, _ bool) {
-	c.scrobble(track.Meta(provider.MetaNavidromeID), true)
+	c.scrobble(track.Owner.ID, true)
 }
 
 // scrobble reports playback of a track to the Subsonic server.

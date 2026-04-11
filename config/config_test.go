@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := defaultConfig()
@@ -34,6 +38,9 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.AutoPlay {
 		t.Error("AutoPlay should be false by default")
+	}
+	if !cfg.MediaControls {
+		t.Error("MediaControls should be true by default")
 	}
 	if cfg.Shuffle {
 		t.Error("Shuffle should be false by default")
@@ -490,6 +497,32 @@ func TestOverridesApplyClamps(t *testing.T) {
 
 	if cfg.Volume != 6 {
 		t.Errorf("Volume should be clamped to 6, got %f", cfg.Volume)
+	}
+}
+
+func TestLoadParsesMediaControls(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	path, err := configPath()
+	if err != nil {
+		t.Fatalf("configPath() error = %v", err)
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("media_controls = false\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.MediaControls {
+		t.Fatal("MediaControls = true, want false")
 	}
 }
 

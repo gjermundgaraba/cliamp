@@ -11,7 +11,6 @@ import (
 
 	"cliamp/external/local"
 	"cliamp/internal/sshurl"
-	"cliamp/player"
 	"cliamp/playlist"
 	"cliamp/resolve"
 )
@@ -385,7 +384,7 @@ func shellQuote(s string) string {
 func sshFindAudio(host string, paths []string) ([]string, error) {
 	var nameArgs []string
 	first := true
-	for ext := range player.SupportedExts {
+	for ext := range playlist.SupportedAudioExts {
 		if !first {
 			nameArgs = append(nameArgs, "-o")
 		}

@@ -233,6 +233,13 @@ func (c *Client) StreamURL(partKey string) string {
 	return c.baseURL + partKey + "?X-Plex-Token=" + url.QueryEscape(c.token)
 }
 
+func (c *Client) ThumbURL(ratingKey string) string {
+	if ratingKey == "" {
+		return ""
+	}
+	return c.baseURL + "/library/metadata/" + url.PathEscape(ratingKey) + "/thumb?X-Plex-Token=" + url.QueryEscape(c.token)
+}
+
 // trackJSON is the shared JSON structure for track responses (children and search).
 type trackJSON struct {
 	RatingKey        string `json:"ratingKey"`

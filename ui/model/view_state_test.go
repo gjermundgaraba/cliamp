@@ -133,10 +133,10 @@ func TestRenderNavBrowserIncludesFooterMessages(t *testing.T) {
 	m := Model{
 		width:  80,
 		height: 24,
-		navBrowser: navBrowserState{
+		providers: providerState{nav: navBrowserState{
 			visible: true,
 			mode:    navBrowseModeMenu,
-		},
+		}},
 	}
 	m.save.startDownload()
 

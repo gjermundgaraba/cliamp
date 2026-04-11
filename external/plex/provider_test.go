@@ -172,6 +172,9 @@ func TestProvider_Tracks(t *testing.T) {
 	if tr.DurationSecs != 565 {
 		t.Errorf("DurationSecs = %d, want 565", tr.DurationSecs)
 	}
+	if tr.Artwork.CacheKey != "plex:200" {
+		t.Errorf("Artwork.CacheKey = %q, want plex:200", tr.Artwork.CacheKey)
+	}
 	if !tr.Stream {
 		t.Error("Stream = false, want true")
 	}

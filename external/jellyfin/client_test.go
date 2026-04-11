@@ -214,7 +214,7 @@ func TestClientReportNowPlaying(t *testing.T) {
 	t.Cleanup(func() { appmeta.SetVersion("dev") })
 	c := NewClient("https://jf.example.com", "tok", "user-1", "", "")
 	track := playlist.Track{
-		ProviderMeta: map[string]string{provider.MetaJellyfinID: "track-1"},
+		Owner: playlist.TrackOwner{Provider: provider.KeyJellyfin, ID: "track-1"},
 	}
 
 	useTestClient(t, func(req *http.Request) (*http.Response, error) {
@@ -249,7 +249,7 @@ func TestClientReportNowPlaying(t *testing.T) {
 func TestClientReportScrobble(t *testing.T) {
 	c := NewClient("https://jf.example.com", "tok", "user-1", "", "")
 	track := playlist.Track{
-		ProviderMeta: map[string]string{provider.MetaJellyfinID: "track-1"},
+		Owner: playlist.TrackOwner{Provider: provider.KeyJellyfin, ID: "track-1"},
 	}
 
 	call := 0

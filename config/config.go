@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cliamp/internal/appdir"
+	"cliamp/provider"
 )
 
 // configPath returns the path to the config file.
@@ -136,6 +137,7 @@ type Config struct {
 	Mono            bool
 	Speed           float64                      // playback speed ratio: 0.25–2.0 (default 1.0)
 	AutoPlay        bool                         // start playback automatically on launch (radio streams, CLI tracks)
+	MediaControls   bool                         // publish OS media controls / remote command handlers
 	SeekStepLarge   int                          // seconds for Shift+Left/Right seek jumps
 	Provider        string                       // default provider: "radio", "navidrome", "spotify", "plex", "jellyfin", "ytmusic" (default "radio")
 	Theme           string                       // theme name, or "" for ANSI default
@@ -165,6 +167,7 @@ func defaultConfig() Config {
 	return Config{
 		Repeat:          "off",
 		AutoPlay:        false,
+		MediaControls:   true,
 		Speed:           1.0,
 		SeekStepLarge:   30,
 		SampleRate:      0,
@@ -320,6 +323,8 @@ func Load() (Config, error) {
 				cfg.Mono = val == "true"
 			case "auto_play":
 				cfg.AutoPlay = val == "true"
+			case "media_controls":
+				cfg.MediaControls = val == "true"
 			case "seek_large_step_sec":
 				if v, err := strconv.Atoi(val); err == nil {
 					cfg.SeekStepLarge = v
@@ -331,7 +336,12 @@ func Load() (Config, error) {
 			case "theme":
 				cfg.Theme = strings.Trim(val, `"'`)
 			case "provider":
-				cfg.Provider = strings.ToLower(strings.Trim(val, `"'`))
+				raw := strings.ToLower(strings.Trim(val, `"'`))
+				if normalized, ok := provider.NormalizeDefaultProviderKey(raw); ok {
+					cfg.Provider = normalized
+				} else {
+					cfg.Provider = raw
+				}
 			case "visualizer":
 				cfg.Visualizer = strings.Trim(val, `"'`)
 			case "sample_rate":

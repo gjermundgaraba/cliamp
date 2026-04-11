@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"cliamp/internal/playback"
 	"cliamp/luaplugin"
 	"cliamp/playlist"
@@ -16,9 +18,14 @@ func (m *Model) notifyAll() {
 	m.notifyPlugins()
 }
 
-func (m *Model) attachNotifier(notifier playback.Notifier) {
+func (m *Model) attachNotifier(notifier playback.Notifier) tea.Cmd {
 	m.notifier = notifier
 	m.notifyAll()
+	if notifier == nil {
+		return nil
+	}
+	m.ensureArtworkMaterializer()
+	return m.refreshCurrentArtwork()
 }
 
 // notifyPlugins emits a playback state event to Lua plugins.
@@ -95,6 +102,7 @@ func (m *Model) notifyPlayback() {
 			Genre:       track.Genre,
 			TrackNumber: track.TrackNumber,
 			URL:         track.Path,
+			ArtworkPath: m.artwork.session.path,
 			Duration:    m.player.Duration(),
 		},
 		VolumeDB: m.player.Volume(),
@@ -119,7 +127,7 @@ func (m *Model) nowPlaying(track playlist.Track) {
 
 // maybeScrobble fires a playback-complete report for the given track if all
 // conditions are met:
-//   - a provider claims the track via provider metadata
+//   - a provider claims the track via Track.Owner
 //   - the track reached at least 50% of its known duration
 //
 // The call is dispatched in a goroutine so it never blocks the UI.
@@ -158,24 +166,9 @@ func (m *Model) maybeScrobble(track playlist.Track, elapsed, duration time.Durat
 // findPlaybackReporter returns the first registered provider that can report
 // playback for the given track.
 func (m *Model) findPlaybackReporter(track playlist.Track) provider.PlaybackReporter {
-	match := func(p playlist.Provider) provider.PlaybackReporter {
-		reporter, ok := p.(provider.PlaybackReporter)
-		if !ok || !reporter.CanReportPlayback(track) {
-			return nil
-		}
-		return reporter
+	reporter, ok := m.providerForTrackOwner(track).(provider.PlaybackReporter)
+	if !ok || !reporter.CanReportPlayback(track) {
+		return nil
 	}
-
-	if reporter := match(m.provider); reporter != nil {
-		return reporter
-	}
-	for _, pe := range m.providers {
-		if pe.Provider == nil {
-			continue
-		}
-		if reporter := match(pe.Provider); reporter != nil {
-			return reporter
-		}
-	}
-	return nil
+	return reporter
 }

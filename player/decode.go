@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"cliamp/internal/sshurl"
-
 	"github.com/gopxl/beep/v2"
 	"github.com/gopxl/beep/v2/flac"
 	"github.com/gopxl/beep/v2/mp3"
@@ -20,22 +18,8 @@ import (
 	"github.com/gopxl/beep/v2/wav"
 
 	"cliamp/internal/httpclient"
+	"cliamp/internal/sshurl"
 )
-
-// SupportedExts is the set of file extensions the player can decode.
-var SupportedExts = map[string]bool{
-	".mp3":  true,
-	".wav":  true,
-	".flac": true,
-	".ogg":  true,
-	".m4a":  true,
-	".aac":  true,
-	".m4b":  true,
-	".alac": true,
-	".wma":  true,
-	".opus": true,
-	".webm": true,
-}
 
 // httpClient is the shared streaming HTTP client. See internal/httpclient
 // for configuration rationale (no overall timeout, HTTP/2 disabled for Icecast).

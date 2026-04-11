@@ -77,22 +77,22 @@ func (m Model) navScrollItems(total int, labelFn func(int) string) []string {
 		maxVisible = 5
 	}
 
-	useFilter := len(m.navBrowser.searchIdx) > 0 || m.navBrowser.search != ""
-	scroll := m.navBrowser.scroll
+	useFilter := len(m.providers.nav.searchIdx) > 0 || m.providers.nav.search != ""
+	scroll := m.providers.nav.scroll
 
 	var lines []string
 	rendered := 0
 
 	if useFilter {
-		for j := scroll; j < len(m.navBrowser.searchIdx) && rendered < maxVisible; j++ {
-			label := labelFn(m.navBrowser.searchIdx[j])
-			lines = append(lines, cursorLine(label, j == m.navBrowser.cursor))
+		for j := scroll; j < len(m.providers.nav.searchIdx) && rendered < maxVisible; j++ {
+			label := labelFn(m.providers.nav.searchIdx[j])
+			lines = append(lines, cursorLine(label, j == m.providers.nav.cursor))
 			rendered++
 		}
 	} else {
 		for i := scroll; i < total && rendered < maxVisible; i++ {
 			label := labelFn(i)
-			lines = append(lines, cursorLine(label, i == m.navBrowser.cursor))
+			lines = append(lines, cursorLine(label, i == m.providers.nav.cursor))
 			rendered++
 		}
 	}
@@ -102,19 +102,19 @@ func (m Model) navScrollItems(total int, labelFn func(int) string) []string {
 
 // navCountLine renders an "X/Y noun (filtered)" footer.
 func (m Model) navCountLine(noun string, total int) string {
-	if len(m.navBrowser.searchIdx) > 0 || m.navBrowser.search != "" {
-		return dimStyle.Render(fmt.Sprintf("  %d/%d %s (filtered)", len(m.navBrowser.searchIdx), total, noun))
+	if len(m.providers.nav.searchIdx) > 0 || m.providers.nav.search != "" {
+		return dimStyle.Render(fmt.Sprintf("  %d/%d %s (filtered)", len(m.providers.nav.searchIdx), total, noun))
 	}
-	return dimStyle.Render(fmt.Sprintf("  %d/%d %s", m.navBrowser.cursor+1, total, noun))
+	return dimStyle.Render(fmt.Sprintf("  %d/%d %s", m.providers.nav.cursor+1, total, noun))
 }
 
 // navSearchBar renders the search input or a help-key hint as footer lines.
 func (m Model) navSearchBar(defaultHelp string) []string {
-	if m.navBrowser.searching {
-		return []string{"", playlistSelectedStyle.Render("  / " + m.navBrowser.search + "_")}
+	if m.providers.nav.searching {
+		return []string{"", playlistSelectedStyle.Render("  / " + m.providers.nav.search + "_")}
 	}
-	if m.navBrowser.search != "" {
-		return []string{"", dimStyle.Render("  / "+m.navBrowser.search) + " " + helpKey("/", "Clear")}
+	if m.providers.nav.search != "" {
+		return []string{"", dimStyle.Render("  / "+m.providers.nav.search) + " " + helpKey("/", "Clear")}
 	}
 	return []string{"", defaultHelp}
 }

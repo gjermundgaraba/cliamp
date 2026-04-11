@@ -112,6 +112,132 @@ func TestParseXiaoyuzhouOgAudioTakesPrecedence(t *testing.T) {
 	}
 }
 
+func TestResolveFeedReusesArtworkCacheKeyForSharedChannelImage(t *testing.T) {
+	const imageURL = "https://cdn.example.com/show.png"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Podcast</title>
+    <itunes:image href="` + imageURL + `" />
+    <item>
+      <title>Episode 1</title>
+      <enclosure url="https://cdn.example.com/ep1.mp3" type="audio/mpeg" />
+    </item>
+    <item>
+      <title>Episode 2</title>
+      <enclosure url="https://cdn.example.com/ep2.mp3" type="audio/mpeg" />
+    </item>
+  </channel>
+</rss>`))
+	}))
+	defer server.Close()
+
+	tracks, err := resolveFeed(server.URL)
+	if err != nil {
+		t.Fatalf("resolveFeed() error = %v", err)
+	}
+	if len(tracks) != 2 {
+		t.Fatalf("resolveFeed() returned %d tracks, want 2", len(tracks))
+	}
+	if tracks[0].Artwork.CacheKey != "feed:"+imageURL {
+		t.Fatalf("first artwork cache key = %q, want %q", tracks[0].Artwork.CacheKey, "feed:"+imageURL)
+	}
+	if tracks[1].Artwork.CacheKey != tracks[0].Artwork.CacheKey {
+		t.Fatalf("artwork cache keys differ: %q vs %q", tracks[0].Artwork.CacheKey, tracks[1].Artwork.CacheKey)
+	}
+}
+
+func TestResolveFeedResolvesRelativeArtworkURLs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Podcast</title>
+    <itunes:image href="show.png" />
+    <item>
+      <title>Episode 1</title>
+      <itunes:image href="episodes/ep1.png" />
+      <enclosure url="https://cdn.example.com/ep1.mp3" type="audio/mpeg" />
+    </item>
+    <item>
+      <title>Episode 2</title>
+      <enclosure url="https://cdn.example.com/ep2.mp3" type="audio/mpeg" />
+    </item>
+  </channel>
+</rss>`))
+	}))
+	defer server.Close()
+
+	tracks, err := resolveFeed(server.URL + "/feeds/show.xml")
+	if err != nil {
+		t.Fatalf("resolveFeed() error = %v", err)
+	}
+	if len(tracks) != 2 {
+		t.Fatalf("resolveFeed() returned %d tracks, want 2", len(tracks))
+	}
+
+	wantItemURL := server.URL + "/feeds/episodes/ep1.png"
+	if tracks[0].Artwork.URL != wantItemURL {
+		t.Fatalf("episode artwork URL = %q, want %q", tracks[0].Artwork.URL, wantItemURL)
+	}
+	if tracks[0].Artwork.CacheKey != "feed:"+wantItemURL {
+		t.Fatalf("episode artwork cache key = %q, want %q", tracks[0].Artwork.CacheKey, "feed:"+wantItemURL)
+	}
+
+	wantChannelURL := server.URL + "/feeds/show.png"
+	if tracks[1].Artwork.URL != wantChannelURL {
+		t.Fatalf("channel artwork URL = %q, want %q", tracks[1].Artwork.URL, wantChannelURL)
+	}
+	if tracks[1].Artwork.CacheKey != "feed:"+wantChannelURL {
+		t.Fatalf("channel artwork cache key = %q, want %q", tracks[1].Artwork.CacheKey, "feed:"+wantChannelURL)
+	}
+}
+
+func TestResolveFeedResolvesArtworkURLsAgainstRedirectedFeedURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/feed":
+			http.Redirect(w, r, "/feeds/show.xml", http.StatusFound)
+		case "/feeds/show.xml":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Podcast</title>
+    <itunes:image href="show.png" />
+    <item>
+      <title>Episode 1</title>
+      <enclosure url="https://cdn.example.com/ep1.mp3" type="audio/mpeg" />
+    </item>
+  </channel>
+</rss>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	tracks, err := resolveFeed(server.URL + "/feed")
+	if err != nil {
+		t.Fatalf("resolveFeed() error = %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("resolveFeed() returned %d tracks, want 1", len(tracks))
+	}
+
+	want := server.URL + "/feeds/show.png"
+	if tracks[0].Artwork.URL != want {
+		t.Fatalf("redirected artwork URL = %q, want %q", tracks[0].Artwork.URL, want)
+	}
+	if tracks[0].Artwork.CacheKey != "feed:"+want {
+		t.Fatalf("redirected artwork cache key = %q, want %q", tracks[0].Artwork.CacheKey, "feed:"+want)
+	}
+}
+
 func TestParseItunesDuration(t *testing.T) {
 	tests := []struct {
 		input string

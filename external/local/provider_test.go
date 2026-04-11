@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"cliamp/playlist"
+	"cliamp/provider"
 )
 
 func newTestProvider(t *testing.T) *Provider {
@@ -97,12 +98,18 @@ func TestWriteTrackAllFields(t *testing.T) {
 		DurationSecs: 240,
 		Favorite:     true,
 		Feed:         true,
+		Artwork:      playlist.RemoteArtwork("spotify:album:album-1", "https://i.scdn.co/image/album-1"),
+		Owner:        playlist.TrackOwner{Provider: provider.KeySpotify, ID: "track-1"},
 	})
 	got := buf.String()
 
 	for _, want := range []string{
 		`path = "/music/song.flac"`,
 		`title = "Title"`,
+		`owner_provider = "spotify"`,
+		`owner_id = "track-1"`,
+		`artwork_url = "https://i.scdn.co/image/album-1"`,
+		`artwork_cache_key = "spotify:album:album-1"`,
 		`artist = "Artist"`,
 		`album = "Album"`,
 		`genre = "Rock"`,
@@ -126,7 +133,15 @@ func TestLoadTOMLRoundTrip(t *testing.T) {
 
 	tracks := []playlist.Track{
 		{Path: "/a.mp3", Title: "A", Artist: "Art1", Album: "Alb", Year: 2020, TrackNumber: 1, DurationSecs: 180, Favorite: true},
-		{Path: "/b.flac", Title: "B", Genre: "Jazz", Feed: true},
+		{
+			Path:         "https://stream.example.com/live",
+			Title:        "B",
+			Genre:        "Jazz",
+			Feed:         true,
+			Artwork:      playlist.RemoteArtwork("stream:cover-1", "https://stream.example.com/cover.jpg"),
+			Owner:        playlist.TrackOwner{Provider: provider.KeyJellyfin, ID: "track-2"},
+			DurationSecs: 120,
+		},
 	}
 
 	if err := p.savePlaylist("test", tracks); err != nil {
@@ -144,6 +159,9 @@ func TestLoadTOMLRoundTrip(t *testing.T) {
 	if loaded[0].Path != "/a.mp3" || loaded[0].Title != "A" || loaded[0].Artist != "Art1" {
 		t.Fatalf("track 0 mismatch: %+v", loaded[0])
 	}
+	if loaded[0].Artwork.Path != "/a.mp3" {
+		t.Fatalf("track 0 artwork path = %q, want /a.mp3", loaded[0].Artwork.Path)
+	}
 	if !loaded[0].Favorite {
 		t.Fatal("track 0 should be favorite")
 	}
@@ -151,11 +169,122 @@ func TestLoadTOMLRoundTrip(t *testing.T) {
 		t.Fatalf("track 0 numeric fields mismatch: %+v", loaded[0])
 	}
 
-	if loaded[1].Path != "/b.flac" || loaded[1].Title != "B" || loaded[1].Genre != "Jazz" {
+	if loaded[1].Path != "https://stream.example.com/live" || loaded[1].Title != "B" || loaded[1].Genre != "Jazz" {
 		t.Fatalf("track 1 mismatch: %+v", loaded[1])
+	}
+	if loaded[1].Artwork.URL != "https://stream.example.com/cover.jpg" {
+		t.Fatalf("track 1 artwork url = %q, want %q", loaded[1].Artwork.URL, "https://stream.example.com/cover.jpg")
+	}
+	if loaded[1].Artwork.CacheKey != "stream:cover-1" {
+		t.Fatalf("track 1 artwork cache key = %q, want %q", loaded[1].Artwork.CacheKey, "stream:cover-1")
+	}
+	if loaded[1].Owner.Provider != provider.KeyJellyfin || loaded[1].Owner.ID != "track-2" {
+		t.Fatalf("track 1 owner = %+v, want jellyfin/track-2", loaded[1].Owner)
 	}
 	if !loaded[1].Feed {
 		t.Fatal("track 1 should have feed=true")
+	}
+}
+
+func TestLoadTOMLRemoteArtworkFieldsAnyOrder(t *testing.T) {
+	p := newTestProvider(t)
+	os.MkdirAll(p.dir, 0o755)
+
+	content := `[[track]]
+artwork_cache_key = "spotify:album:album-1"
+artwork_url = "https://i.scdn.co/image/album-1"
+path = "spotify:track:abc123"
+title = "Spotify"
+`
+	path := filepath.Join(p.dir, "remote-artwork.toml")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	tracks, err := p.loadTOML(path)
+	if err != nil {
+		t.Fatalf("loadTOML: %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("got %d tracks, want 1", len(tracks))
+	}
+	if tracks[0].Artwork.URL != "https://i.scdn.co/image/album-1" {
+		t.Fatalf("artwork url = %q, want %q", tracks[0].Artwork.URL, "https://i.scdn.co/image/album-1")
+	}
+	if tracks[0].Artwork.CacheKey != "spotify:album:album-1" {
+		t.Fatalf("artwork cache key = %q, want %q", tracks[0].Artwork.CacheKey, "spotify:album:album-1")
+	}
+}
+
+func TestLoadTOMLIncompleteRemoteArtworkDropsInvalidRemoteRef(t *testing.T) {
+	p := newTestProvider(t)
+	os.MkdirAll(p.dir, 0o755)
+
+	content := `[[track]]
+artwork_cache_key = "spotify:album:album-1"
+path = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+title = "Video"
+`
+	path := filepath.Join(p.dir, "incomplete-remote-artwork.toml")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	tracks, err := p.loadTOML(path)
+	if err != nil {
+		t.Fatalf("loadTOML: %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("got %d tracks, want 1", len(tracks))
+	}
+	if !tracks[0].Artwork.IsNone() {
+		t.Fatalf("artwork = %+v, want none", tracks[0].Artwork)
+	}
+}
+
+func TestLoadTOMLIncompleteRemoteArtworkURLOnlyDropsInvalidRemoteRef(t *testing.T) {
+	p := newTestProvider(t)
+	os.MkdirAll(p.dir, 0o755)
+
+	content := `[[track]]
+artwork_url = "https://i.scdn.co/image/album-1"
+path = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+title = "Video"
+`
+	path := filepath.Join(p.dir, "incomplete-remote-artwork-url-only.toml")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	tracks, err := p.loadTOML(path)
+	if err != nil {
+		t.Fatalf("loadTOML: %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("got %d tracks, want 1", len(tracks))
+	}
+	if !tracks[0].Artwork.IsNone() {
+		t.Fatalf("artwork = %+v, want none", tracks[0].Artwork)
+	}
+}
+
+func TestLoadTOMLExistingYouTubePlaylistInfersArtwork(t *testing.T) {
+	p := newTestProvider(t)
+	os.MkdirAll(p.dir, 0o755)
+
+	content := `[[track]]
+path = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+title = "Video"
+`
+	path := filepath.Join(p.dir, "youtube-old.toml")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	tracks, err := p.loadTOML(path)
+	if err != nil {
+		t.Fatalf("loadTOML: %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("got %d tracks, want 1", len(tracks))
+	}
+	if tracks[0].Artwork.URL != "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" {
+		t.Fatalf("artwork url = %q, want youtube thumbnail", tracks[0].Artwork.URL)
+	}
+	if tracks[0].Artwork.CacheKey != "youtube:dQw4w9WgXcQ" {
+		t.Fatalf("artwork cache key = %q, want youtube cache key", tracks[0].Artwork.CacheKey)
 	}
 }
 
@@ -181,6 +310,59 @@ title = "A"
 	}
 	if tracks[0].Title != "A" {
 		t.Fatalf("Title = %q, want %q", tracks[0].Title, "A")
+	}
+}
+
+func TestLoadTOMLCustomAndSSHPathsSkipEmbeddedArtwork(t *testing.T) {
+	p := newTestProvider(t)
+	os.MkdirAll(p.dir, 0o755)
+
+	content := `[[track]]
+path = "spotify:track:abc123"
+title = "Spotify"
+
+[[track]]
+path = "ssh://nas/music/Artist - Song.mp3"
+title = "SSH"
+`
+	path := filepath.Join(p.dir, "uris.toml")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	tracks, err := p.loadTOML(path)
+	if err != nil {
+		t.Fatalf("loadTOML: %v", err)
+	}
+	if len(tracks) != 2 {
+		t.Fatalf("got %d tracks, want 2", len(tracks))
+	}
+	if !tracks[0].Artwork.IsNone() {
+		t.Fatalf("spotify artwork = %+v, want none", tracks[0].Artwork)
+	}
+	if !tracks[1].Artwork.IsNone() {
+		t.Fatalf("ssh artwork = %+v, want none", tracks[1].Artwork)
+	}
+}
+
+func TestLoadTOMLColonFilenameKeepsEmbeddedArtwork(t *testing.T) {
+	p := newTestProvider(t)
+	os.MkdirAll(p.dir, 0o755)
+
+	content := `[[track]]
+path = "Artist: Song.mp3"
+title = "Colon"
+`
+	path := filepath.Join(p.dir, "colon.toml")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	tracks, err := p.loadTOML(path)
+	if err != nil {
+		t.Fatalf("loadTOML: %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("got %d tracks, want 1", len(tracks))
+	}
+	if tracks[0].Artwork.Path != "Artist: Song.mp3" {
+		t.Fatalf("artwork path = %q, want %q", tracks[0].Artwork.Path, "Artist: Song.mp3")
 	}
 }
 

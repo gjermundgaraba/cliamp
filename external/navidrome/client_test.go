@@ -211,11 +211,14 @@ func TestTracks(t *testing.T) {
 	if tr.DurationSecs != 565 {
 		t.Errorf("DurationSecs = %d, want 565", tr.DurationSecs)
 	}
+	if tr.Artwork.CacheKey != "navidrome:song-1" {
+		t.Errorf("Artwork.CacheKey = %q, want navidrome:song-1", tr.Artwork.CacheKey)
+	}
 	if !tr.Stream {
 		t.Error("Stream = false, want true")
 	}
-	if got := tr.Meta(provider.MetaNavidromeID); got != "song-1" {
-		t.Errorf("Meta(NavidromeID) = %q, want %q", got, "song-1")
+	if tr.Owner != (playlist.TrackOwner{Provider: provider.KeyNavidrome, ID: "song-1"}) {
+		t.Errorf("Owner = %+v, want navidrome/song-1", tr.Owner)
 	}
 	if !strings.Contains(tr.Path, "/rest/stream") {
 		t.Errorf("Path %q missing /rest/stream", tr.Path)
@@ -491,7 +494,7 @@ func TestDefaultAlbumSort(t *testing.T) {
 
 func TestCanReportPlayback(t *testing.T) {
 	c := New("http://localhost", "u", "p")
-	track := trackWithNavidromeMeta("song-1")
+	track := trackWithNavidromeOwner("song-1")
 	if !c.CanReportPlayback(track) {
 		t.Error("CanReportPlayback() = false for track with navidrome ID")
 	}
@@ -502,11 +505,40 @@ func TestCanReportPlayback(t *testing.T) {
 	}
 }
 
-func TestCanReportPlayback_NoMeta(t *testing.T) {
+func TestCanReportPlayback_NoOwner(t *testing.T) {
 	c := New("http://localhost", "u", "p")
-	track := trackWithNavidromeMeta("")
+	track := trackWithNavidromeOwner("")
 	if c.CanReportPlayback(track) {
 		t.Error("CanReportPlayback() = true for track without navidrome ID")
+	}
+}
+
+func TestResolveArtwork(t *testing.T) {
+	c := New("http://localhost", "u", "p")
+
+	ref, err := c.ResolveArtwork(nil, trackWithNavidromeOwner("song-1"))
+	if err != nil {
+		t.Fatalf("ResolveArtwork() error: %v", err)
+	}
+	if ref.CacheKey != "navidrome:song-1" {
+		t.Fatalf("artwork cache key = %q, want navidrome:song-1", ref.CacheKey)
+	}
+	if !strings.Contains(ref.URL, "/rest/getCoverArt") || !strings.Contains(ref.URL, "id=song-1") {
+		t.Fatalf("artwork url = %q, want cover art endpoint for song-1", ref.URL)
+	}
+}
+
+func TestResolveArtworkWithoutOwner(t *testing.T) {
+	c := New("http://localhost", "u", "p")
+
+	ref, err := c.ResolveArtwork(nil, playlist.Track{
+		Path: c.streamURL("song-1"),
+	})
+	if err != nil {
+		t.Fatalf("ResolveArtwork() error: %v", err)
+	}
+	if !ref.IsNone() {
+		t.Fatalf("ResolveArtwork() ref = %+v, want none", ref)
 	}
 }
 
@@ -522,12 +554,12 @@ func TestScrobble(t *testing.T) {
 
 	c := New(srv.URL, "u", "p")
 
-	c.ReportNowPlaying(trackWithNavidromeMeta("song-1"), 0, false)
+	c.ReportNowPlaying(trackWithNavidromeOwner("song-1"), 0, false)
 	if gotSubmission != "false" {
 		t.Errorf("ReportNowPlaying submission = %q, want false", gotSubmission)
 	}
 
-	c.ReportScrobble(trackWithNavidromeMeta("song-1"), 0, 0, false)
+	c.ReportScrobble(trackWithNavidromeOwner("song-1"), 0, 0, false)
 	if gotSubmission != "true" {
 		t.Errorf("ReportScrobble submission = %q, want true", gotSubmission)
 	}
@@ -555,10 +587,6 @@ func TestCheckSubsonicError(t *testing.T) {
 	}
 }
 
-func trackWithNavidromeMeta(id string) playlist.Track {
-	meta := map[string]string{}
-	if id != "" {
-		meta[provider.MetaNavidromeID] = id
-	}
-	return playlist.Track{ProviderMeta: meta}
+func trackWithNavidromeOwner(id string) playlist.Track {
+	return playlist.Track{Owner: playlist.TrackOwner{Provider: provider.KeyNavidrome, ID: id}}
 }

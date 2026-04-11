@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ var (
 	_ provider.ArtistBrowser    = (*Provider)(nil)
 	_ provider.AlbumBrowser     = (*Provider)(nil)
 	_ provider.AlbumTrackLoader = (*Provider)(nil)
+	_ provider.ArtworkResolver  = (*Provider)(nil)
 	_ provider.PlaybackReporter = (*Provider)(nil)
 )
 
@@ -67,7 +69,14 @@ func (p *Provider) AlbumTracks(albumID string) ([]playlist.Track, error) {
 }
 
 func (p *Provider) CanReportPlayback(track playlist.Track) bool {
-	return track.Meta(provider.MetaJellyfinID) != ""
+	return track.Owner.Provider == provider.KeyJellyfin && track.Owner.ID != ""
+}
+
+func (p *Provider) ResolveArtwork(_ context.Context, track playlist.Track) (playlist.ArtworkRef, error) {
+	if track.Owner.Provider != provider.KeyJellyfin || track.Owner.ID == "" {
+		return playlist.NoArtwork(), nil
+	}
+	return playlist.RemoteArtwork("jellyfin:"+track.Owner.ID, p.client.ImageURL(track.Owner.ID)), nil
 }
 
 func (p *Provider) ReportNowPlaying(track playlist.Track, position time.Duration, canSeek bool) {
@@ -145,7 +154,8 @@ func (p *Provider) Tracks(albumID string) ([]playlist.Track, error) {
 			TrackNumber:  t.TrackNumber,
 			DurationSecs: t.DurationSecs,
 			Stream:       true,
-			ProviderMeta: map[string]string{provider.MetaJellyfinID: t.ID},
+			Artwork:      playlist.RemoteArtwork("jellyfin:"+t.ID, p.client.ImageURL(t.ID)),
+			Owner:        playlist.TrackOwner{Provider: provider.KeyJellyfin, ID: t.ID},
 		})
 	}
 

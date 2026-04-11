@@ -14,22 +14,23 @@ import (
 func readTags(path string) Track {
 	f, err := os.Open(path)
 	if err != nil {
-		return TrackFromFilename(path)
+		return trackFromLocalFilename(path)
 	}
 	defer f.Close()
 
 	m, err := tag.ReadFrom(f)
 	if err != nil || m == nil || strings.TrimSpace(m.Title()) == "" {
-		return TrackFromFilename(path)
+		return trackFromLocalFilename(path)
 	}
 
 	t := Track{
-		Path:   path,
-		Title:  sanitizeTag(strings.TrimSpace(m.Title())),
-		Artist: sanitizeTag(strings.TrimSpace(m.Artist())),
-		Album:  sanitizeTag(strings.TrimSpace(m.Album())),
-		Genre:  sanitizeTag(strings.TrimSpace(m.Genre())),
-		Year:   m.Year(),
+		Path:    path,
+		Title:   sanitizeTag(strings.TrimSpace(m.Title())),
+		Artist:  sanitizeTag(strings.TrimSpace(m.Artist())),
+		Album:   sanitizeTag(strings.TrimSpace(m.Album())),
+		Genre:   sanitizeTag(strings.TrimSpace(m.Genre())),
+		Year:    m.Year(),
+		Artwork: EmbeddedArtwork(path),
 	}
 	trackNum, _ := m.Track()
 	t.TrackNumber = trackNum
@@ -43,7 +44,17 @@ func TrackFromFilename(path string) Track {
 	name := sanitizeTag(strings.TrimSuffix(base, filepath.Ext(base)))
 	parts := strings.SplitN(name, " - ", 2)
 	if len(parts) == 2 {
-		return Track{Path: path, Artist: strings.TrimSpace(parts[0]), Title: strings.TrimSpace(parts[1])}
+		return Track{
+			Path:   path,
+			Artist: strings.TrimSpace(parts[0]),
+			Title:  strings.TrimSpace(parts[1]),
+		}
 	}
 	return Track{Path: path, Title: name}
+}
+
+func trackFromLocalFilename(path string) Track {
+	t := TrackFromFilename(path)
+	t.Artwork = EmbeddedArtwork(path)
+	return t
 }

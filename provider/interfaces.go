@@ -40,6 +40,12 @@ type AlbumTrackLoader interface {
 	AlbumTracks(albumID string) ([]playlist.Track, error)
 }
 
+// ArtworkResolver is implemented by providers that can lazily recover artwork
+// for tracks they recognize via canonical ownership or path patterns.
+type ArtworkResolver interface {
+	ResolveArtwork(ctx context.Context, track playlist.Track) (playlist.ArtworkRef, error)
+}
+
 // PlaybackReporter is implemented by providers that accept now-playing and
 // playback-completion reports for tracks they originated.
 type PlaybackReporter interface {

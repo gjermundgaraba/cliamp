@@ -82,8 +82,13 @@ Each `[[track]]` section supports:
 | `path` | Yes | File path or HTTP URL |
 | `title` | Yes | Display title |
 | `artist` | No | Artist name |
+| `artwork_url` | No | Remote artwork URL for provider-backed tracks |
+| `artwork_cache_key` | No | Stable cache key paired with `artwork_url` |
 
 HTTP/HTTPS paths are automatically treated as streams.
+Provider-backed artwork fields are written automatically when you save tracks
+from external providers. When both artwork fields are present, cliamp reloads
+the saved remote artwork without needing to resolve it again from the provider.
 
 ### Podcast / RSS Feed Playlists
 
@@ -185,4 +190,3 @@ title = "My Radio"
 | `a` | Add currently playing track |
 | `d` | Delete playlist (confirms) / Remove track |
 | `Esc` / `←` | Close / Go back |
-

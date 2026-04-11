@@ -28,6 +28,7 @@ import (
 // Compile-time interface checks.
 var (
 	_ provider.Searcher        = (*SpotifyProvider)(nil)
+	_ provider.ArtworkResolver = (*SpotifyProvider)(nil)
 	_ provider.PlaylistWriter  = (*SpotifyProvider)(nil)
 	_ provider.PlaylistCreator = (*SpotifyProvider)(nil)
 	_ provider.CustomStreamer  = (*SpotifyProvider)(nil)
@@ -346,20 +347,6 @@ func (p *SpotifyProvider) Tracks(playlistID string) ([]playlist.Track, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	type trackObj struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Artists []struct {
-			Name string `json:"name"`
-		} `json:"artists"`
-		Album struct {
-			Name        string `json:"name"`
-			ReleaseDate string `json:"release_date"`
-		} `json:"album"`
-		DurationMs  int `json:"duration_ms"`
-		TrackNumber int `json:"track_number"`
-	}
-
 	var all []playlist.Track
 	offset := 0
 	limit := spotifyTrackPageSize
@@ -380,7 +367,7 @@ func (p *SpotifyProvider) Tracks(playlistID string) ([]playlist.Track, error) {
 			query := url.Values{
 				"limit":  {fmt.Sprintf("%d", limit)},
 				"offset": {fmt.Sprintf("%d", offset)},
-				"fields": {"items(item(id,name,artists(name),album(name,release_date),duration_ms,track_number)),total"},
+				"fields": {"items(item(id,name,artists(name),album(id,name,release_date,images(url)),duration_ms,track_number)),total"},
 			}
 			path := fmt.Sprintf("/v1/playlists/%s/items", playlistID)
 			resp, err = p.webAPI(ctx, "GET", path, query)
@@ -395,8 +382,8 @@ func (p *SpotifyProvider) Tracks(playlistID string) ([]playlist.Track, error) {
 
 		var result struct {
 			Items []struct {
-				Item  *trackObj `json:"item"`
-				Track *trackObj `json:"track"`
+				Item  *spotifyTrackObj `json:"item"`
+				Track *spotifyTrackObj `json:"track"`
 			} `json:"items"`
 			Total int `json:"total"`
 		}
@@ -413,28 +400,7 @@ func (p *SpotifyProvider) Tracks(playlistID string) ([]playlist.Track, error) {
 				continue // skip local/unavailable tracks
 			}
 
-			artists := make([]string, len(t.Artists))
-			for i, a := range t.Artists {
-				artists[i] = a.Name
-			}
-
-			var year int
-			if len(t.Album.ReleaseDate) >= 4 {
-				if y, err := strconv.Atoi(t.Album.ReleaseDate[:4]); err == nil {
-					year = y
-				}
-			}
-
-			all = append(all, playlist.Track{
-				Path:         fmt.Sprintf("spotify:track:%s", t.ID),
-				Title:        t.Name,
-				Artist:       strings.Join(artists, ", "),
-				Album:        t.Album.Name,
-				Year:         year,
-				Stream:       false, // must be false: true causes togglePlayPause to stop+restart instead of pause/resume
-				DurationSecs: t.DurationMs / 1000,
-				TrackNumber:  t.TrackNumber,
-			})
+			all = append(all, spotifyTrackToPlaylistTrack(t))
 		}
 
 		if offset+limit >= result.Total {
@@ -627,18 +593,7 @@ func (p *SpotifyProvider) SearchTracks(ctx context.Context, query string, limit 
 
 	var result struct {
 		Tracks struct {
-			Items []struct {
-				ID      string `json:"id"`
-				Name    string `json:"name"`
-				Artists []struct {
-					Name string `json:"name"`
-				} `json:"artists"`
-				Album struct {
-					Name        string `json:"name"`
-					ReleaseDate string `json:"release_date"`
-				} `json:"album"`
-				DurationMs int `json:"duration_ms"`
-			} `json:"items"`
+			Items []spotifyTrackObj `json:"items"`
 		} `json:"tracks"`
 	}
 	if err := decodeBody(resp, &result); err != nil {
@@ -650,26 +605,101 @@ func (p *SpotifyProvider) SearchTracks(ctx context.Context, query string, limit 
 		if t.ID == "" {
 			continue
 		}
-		artists := make([]string, len(t.Artists))
-		for i, a := range t.Artists {
-			artists[i] = a.Name
-		}
-		var year int
-		if len(t.Album.ReleaseDate) >= 4 {
-			if y, err := strconv.Atoi(t.Album.ReleaseDate[:4]); err == nil {
-				year = y
-			}
-		}
-		tracks = append(tracks, playlist.Track{
-			Path:         fmt.Sprintf("spotify:track:%s", t.ID),
-			Title:        t.Name,
-			Artist:       strings.Join(artists, ", "),
-			Album:        t.Album.Name,
-			Year:         year,
-			DurationSecs: t.DurationMs / 1000,
-		})
+		tracks = append(tracks, spotifyTrackToPlaylistTrack(&t))
 	}
 	return tracks, nil
+}
+
+type spotifyImage struct {
+	URL string `json:"url"`
+}
+
+type spotifyTrackAlbum struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	ReleaseDate string         `json:"release_date"`
+	Images      []spotifyImage `json:"images"`
+}
+
+type spotifyTrackObj struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Artists []struct {
+		Name string `json:"name"`
+	} `json:"artists"`
+	Album       spotifyTrackAlbum `json:"album"`
+	DurationMs  int               `json:"duration_ms"`
+	TrackNumber int               `json:"track_number"`
+}
+
+func spotifyTrackToPlaylistTrack(t *spotifyTrackObj) playlist.Track {
+	artists := make([]string, len(t.Artists))
+	for i, a := range t.Artists {
+		artists[i] = a.Name
+	}
+
+	var year int
+	if len(t.Album.ReleaseDate) >= 4 {
+		if y, err := strconv.Atoi(t.Album.ReleaseDate[:4]); err == nil {
+			year = y
+		}
+	}
+
+	return playlist.Track{
+		Path:         fmt.Sprintf("spotify:track:%s", t.ID),
+		Title:        t.Name,
+		Artist:       strings.Join(artists, ", "),
+		Album:        t.Album.Name,
+		Year:         year,
+		Stream:       false, // must be false: true causes togglePlayPause to stop+restart instead of pause/resume
+		DurationSecs: t.DurationMs / 1000,
+		TrackNumber:  t.TrackNumber,
+		Artwork:      spotifyRemoteArtworkRef(t.Album.ID, spotifyAlbumArtworkURL(t.Album)),
+		Owner:        playlist.TrackOwner{Provider: provider.KeySpotify, ID: t.ID},
+	}
+}
+
+func spotifyAlbumArtworkURL(album spotifyTrackAlbum) string {
+	for _, image := range album.Images {
+		if image.URL != "" {
+			return image.URL
+		}
+	}
+	return ""
+}
+
+func spotifyRemoteArtworkRef(albumID, imageURL string) playlist.ArtworkRef {
+	if albumID == "" || imageURL == "" {
+		return playlist.NoArtwork()
+	}
+	return playlist.RemoteArtwork("spotify:album:"+albumID, imageURL)
+}
+
+func (p *SpotifyProvider) ResolveArtwork(ctx context.Context, track playlist.Track) (playlist.ArtworkRef, error) {
+	if track.Owner.Provider != provider.KeySpotify || track.Owner.ID == "" {
+		return playlist.NoArtwork(), nil
+	}
+	if err := p.ensureSession(); err != nil {
+		if errors.Is(err, playlist.ErrNeedsAuth) {
+			return playlist.NoArtwork(), nil
+		}
+		return playlist.NoArtwork(), err
+	}
+
+	resp, err := p.webAPI(ctx, "GET", "/v1/tracks/"+url.PathEscape(track.Owner.ID), url.Values{
+		"fields": {"album(id,images(url))"},
+	})
+	if err != nil {
+		return playlist.NoArtwork(), fmt.Errorf("spotify: resolve artwork: %w", err)
+	}
+
+	var result struct {
+		Album spotifyTrackAlbum `json:"album"`
+	}
+	if err := decodeBody(resp, &result); err != nil {
+		return playlist.NoArtwork(), fmt.Errorf("spotify: parse artwork: %w", err)
+	}
+	return spotifyRemoteArtworkRef(result.Album.ID, spotifyAlbumArtworkURL(result.Album)), nil
 }
 
 // AddTrackToPlaylist adds a track to an existing Spotify playlist.

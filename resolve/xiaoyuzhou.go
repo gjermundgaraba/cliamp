@@ -40,6 +40,9 @@ func resolveXiaoyuzhouEpisode(pageURL string) ([]playlist.Track, error) {
 	if err != nil {
 		return nil, err
 	}
+	if imageURL := extractMetaContent(string(body), "property", "og:image"); imageURL != "" {
+		track.Artwork = playlist.RemoteArtwork("xiaoyuzhou:"+pageURL, imageURL)
+	}
 	return []playlist.Track{track}, nil
 }
 

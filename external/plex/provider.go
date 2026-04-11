@@ -146,6 +146,8 @@ func (p *Provider) convertTracks(plexTracks []Track, limit int) []playlist.Track
 			TrackNumber:  t.TrackNumber,
 			DurationSecs: t.Duration / 1000,
 			Stream:       true,
+			Artwork:      playlist.RemoteArtwork("plex:"+t.RatingKey, p.client.ThumbURL(t.RatingKey)),
+			Owner:        playlist.TrackOwner{Provider: provider.KeyPlex, ID: t.RatingKey},
 		})
 		if limit > 0 && len(tracks) >= limit {
 			break

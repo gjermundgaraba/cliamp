@@ -256,6 +256,16 @@ func writeTrack(w io.Writer, t playlist.Track) {
 	fmt.Fprintln(w, "[[track]]")
 	fmt.Fprintf(w, "path = %q\n", t.Path)
 	fmt.Fprintf(w, "title = %q\n", t.Title)
+	if t.Owner.Provider != "" {
+		fmt.Fprintf(w, "owner_provider = %q\n", t.Owner.Provider)
+	}
+	if t.Owner.ID != "" {
+		fmt.Fprintf(w, "owner_id = %q\n", t.Owner.ID)
+	}
+	if t.Artwork.Kind == playlist.ArtworkKindRemoteURL {
+		fmt.Fprintf(w, "artwork_url = %q\n", t.Artwork.URL)
+		fmt.Fprintf(w, "artwork_cache_key = %q\n", t.Artwork.CacheKey)
+	}
 	if t.Feed {
 		fmt.Fprintln(w, "feed = true")
 	}
@@ -292,6 +302,16 @@ func (p *Provider) loadTOML(path string) ([]playlist.Track, error) {
 
 	var tracks []playlist.Track
 	var current *playlist.Track
+	appendCurrent := func(track *playlist.Track) {
+		if track == nil {
+			return
+		}
+		if track.Artwork.Kind == playlist.ArtworkKindRemoteURL &&
+			(track.Artwork.URL == "" || track.Artwork.CacheKey == "") {
+			track.Artwork = playlist.NoArtwork()
+		}
+		tracks = append(tracks, *track)
+	}
 
 	for _, rawLine := range strings.Split(string(data), "\n") {
 		line := strings.TrimSpace(rawLine)
@@ -303,9 +323,7 @@ func (p *Provider) loadTOML(path string) ([]playlist.Track, error) {
 
 		// New track section.
 		if line == "[[track]]" {
-			if current != nil {
-				tracks = append(tracks, *current)
-			}
+			appendCurrent(current)
 			current = &playlist.Track{}
 			continue
 		}
@@ -324,9 +342,28 @@ func (p *Provider) loadTOML(path string) ([]playlist.Track, error) {
 		val = tomlutil.Unquote(val)
 
 		switch key {
+		case "owner_provider":
+			current.Owner.Provider = val
+		case "owner_id":
+			current.Owner.ID = val
 		case "path":
 			current.Path = val
 			current.Stream = playlist.IsURL(val)
+			if current.Artwork.IsNone() {
+				current.Artwork = playlist.DefaultArtworkForPath(val)
+			}
+		case "artwork_url":
+			if current.Artwork.Kind == playlist.ArtworkKindRemoteURL {
+				current.Artwork.URL = val
+			} else if val != "" {
+				current.Artwork = playlist.ArtworkRef{Kind: playlist.ArtworkKindRemoteURL, URL: val}
+			}
+		case "artwork_cache_key":
+			if current.Artwork.Kind == playlist.ArtworkKindRemoteURL {
+				current.Artwork.CacheKey = val
+			} else if val != "" {
+				current.Artwork = playlist.ArtworkRef{Kind: playlist.ArtworkKindRemoteURL, CacheKey: val}
+			}
 		case "feed":
 			current.Feed = val == "true"
 		case "title":
@@ -353,8 +390,6 @@ func (p *Provider) loadTOML(path string) ([]playlist.Track, error) {
 			current.Favorite = val == "true"
 		}
 	}
-	if current != nil {
-		tracks = append(tracks, *current)
-	}
+	appendCurrent(current)
 	return tracks, nil
 }

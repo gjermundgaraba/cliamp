@@ -98,6 +98,8 @@ On macOS, Cliamp publishes now-playing information to the system's MPNowPlayingI
 
 The macOS implementation requires the media-control runtime to pin the main goroutine to thread 0 (via `runtime.LockOSThread`) so that the Cocoa run loop can pump events. Bubbletea runs on a background goroutine instead.
 
+Set `media_controls = false` in `~/.config/cliamp/config.toml` to disable media-control integration entirely. On Linux this skips MPRIS registration; on macOS it skips MPNowPlayingInfoCenter / MPRemoteCommandCenter registration.
+
 ## Architecture
 
 The app-owned playback command and notifier boundary lives in `internal/playback`. The `mediactl` package translates platform APIs to and from that boundary and owns the platform-specific interactive runtime helper.
@@ -116,3 +118,5 @@ The model publishes playback state through the playback notifier whenever state 
 Shuffle and loop status are not exposed. The `z` and `r` keys in the TUI control shuffle and repeat locally, but these states are not visible to or controllable from external tools.
 
 The `HasTrackList` property is set to false on Linux. Cliamp does not implement the optional `org.mpris.MediaPlayer2.TrackList` interface.
+
+On macOS, the system owns activation behavior for the now-playing tile. Cliamp does not receive a click callback for the artwork/title region, so the only reliable way to suppress relaunch/activation is to disable `media_controls` entirely.

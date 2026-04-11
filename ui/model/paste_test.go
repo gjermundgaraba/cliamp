@@ -106,25 +106,25 @@ func TestHandlePasteRoutesToActiveInput(t *testing.T) {
 		},
 		{
 			name:    "provider search (non-catalog)",
-			model:   Model{provSearch: provSearchState{active: true, query: "rock"}},
+			model:   Model{providers: providerState{search: provSearchState{active: true, query: "rock"}}},
 			content: " ballads",
 			check: func(t *testing.T, m *Model) {
-				if m.provSearch.query != "rock ballads" {
-					t.Fatalf("provSearch.query = %q, want %q", m.provSearch.query, "rock ballads")
+				if m.providers.search.query != "rock ballads" {
+					t.Fatalf("provSearch.query = %q, want %q", m.providers.search.query, "rock ballads")
 				}
 			},
 		},
 		{
 			name: "nav browser search",
-			model: Model{navBrowser: navBrowserState{
+			model: Model{providers: providerState{nav: navBrowserState{
 				visible:   true,
 				mode:      navBrowseModeByAlbum,
 				searching: true,
-			}},
+			}}},
 			content: "album",
 			check: func(t *testing.T, m *Model) {
-				if m.navBrowser.search != "album" {
-					t.Fatalf("navBrowser.search = %q, want %q", m.navBrowser.search, "album")
+				if m.providers.nav.search != "album" {
+					t.Fatalf("navBrowser.search = %q, want %q", m.providers.nav.search, "album")
 				}
 			},
 		},
@@ -164,18 +164,18 @@ func TestHandlePastePriorityOrder(t *testing.T) {
 	// When multiple input states are active, the highest-priority one wins.
 	// Nav browser search has higher priority than net search.
 	m := Model{
-		navBrowser: navBrowserState{
+		providers: providerState{nav: navBrowserState{
 			visible:   true,
 			mode:      navBrowseModeByAlbum,
 			searching: true,
-		},
+		}},
 		netSearch: netSearchState{active: true},
 	}
 
 	m.handlePaste("test")
 
-	if m.navBrowser.search != "test" {
-		t.Fatalf("navBrowser.search = %q, want %q", m.navBrowser.search, "test")
+	if m.providers.nav.search != "test" {
+		t.Fatalf("navBrowser.search = %q, want %q", m.providers.nav.search, "test")
 	}
 	if m.netSearch.query != "" {
 		t.Fatalf("netSearch.query = %q, want empty (lower priority)", m.netSearch.query)

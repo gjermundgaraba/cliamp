@@ -78,21 +78,52 @@ func TestProviderTracks(t *testing.T) {
 	if tr.Title != "So What" || tr.Artist != "Miles Davis" || tr.Album != "Kind of Blue" || tr.TrackNumber != 1 || !tr.Stream {
 		t.Fatalf("track = %+v", tr)
 	}
-	if got := tr.Meta(provider.MetaJellyfinID); got != "track-1" {
-		t.Fatalf("track meta jellyfin id = %q, want track-1", got)
+	if tr.Artwork.CacheKey != "jellyfin:track-1" {
+		t.Fatalf("track artwork cache key = %q, want jellyfin:track-1", tr.Artwork.CacheKey)
+	}
+	if tr.Owner != (playlist.TrackOwner{Provider: provider.KeyJellyfin, ID: "track-1"}) {
+		t.Fatalf("track owner = %+v, want jellyfin/track-1", tr.Owner)
 	}
 }
 
 func TestProviderCanReportPlayback(t *testing.T) {
 	p := newProvider(NewClient("https://jf.example.com", "tok", "user-1", "", ""))
-	if !p.CanReportPlayback(trackWithMeta(provider.MetaJellyfinID, "track-1")) {
+	if !p.CanReportPlayback(trackWithOwner(provider.KeyJellyfin, "track-1")) {
 		t.Fatal("CanReportPlayback() = false, want true")
 	}
-	if p.CanReportPlayback(trackWithMeta(provider.MetaNavidromeID, "nav-1")) {
+	if p.CanReportPlayback(trackWithOwner(provider.KeyNavidrome, "nav-1")) {
 		t.Fatal("CanReportPlayback() = true for non-Jellyfin track")
 	}
 }
 
-func trackWithMeta(key, value string) playlist.Track {
-	return playlist.Track{ProviderMeta: map[string]string{key: value}}
+func TestProviderResolveArtwork(t *testing.T) {
+	p := newProvider(NewClient("https://jf.example.com", "tok", "user-1", "", ""))
+
+	ref, err := p.ResolveArtwork(nil, trackWithOwner(provider.KeyJellyfin, "track-1"))
+	if err != nil {
+		t.Fatalf("ResolveArtwork() error: %v", err)
+	}
+	if ref.CacheKey != "jellyfin:track-1" {
+		t.Fatalf("artwork cache key = %q, want jellyfin:track-1", ref.CacheKey)
+	}
+	if ref.URL != "https://jf.example.com/Items/track-1/Images/Primary?api_key=tok" {
+		t.Fatalf("artwork url = %q", ref.URL)
+	}
+}
+
+func TestProviderResolveArtworkWithoutOwner(t *testing.T) {
+	p := newProvider(NewClient("https://jf.example.com", "tok", "user-1", "", ""))
+
+	ref, err := p.ResolveArtwork(nil, playlist.Track{
+		Path: "https://jf.example.com/Items/track-1/Download?api_key=tok",
+	})
+	if err != nil {
+		t.Fatalf("ResolveArtwork() error: %v", err)
+	}
+	if !ref.IsNone() {
+		t.Fatalf("ResolveArtwork() ref = %+v, want none", ref)
+	}
+}
+func trackWithOwner(providerKey, id string) playlist.Track {
+	return playlist.Track{Owner: playlist.TrackOwner{Provider: providerKey, ID: id}}
 }

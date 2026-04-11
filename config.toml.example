@@ -13,6 +13,10 @@ shuffle = false
 # Start with mono output (L+R downmix)
 mono = false
 
+# Publish OS media controls / media keys integration
+# Set to false on macOS if clicking the Control Centre/Lock Screen tile tries to relaunch cliamp from your terminal.
+# media_controls = false
+
 # Shift+Left/Right seek jump in seconds (6-600)
 seek_large_step_sec = 30
 

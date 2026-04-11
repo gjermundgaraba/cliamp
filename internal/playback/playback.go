@@ -32,6 +32,7 @@ type Track struct {
 	Genre       string
 	TrackNumber int
 	URL         string
+	ArtworkPath string
 	Duration    time.Duration
 }
 

@@ -53,7 +53,7 @@ func (m *Model) openPlaylistManager() {
 
 // plMgrEnterTrackList loads the tracks for a playlist and switches to screen 1.
 func (m *Model) plMgrEnterTrackList(name string) {
-	tracks, err := m.localProvider.Tracks(name)
+	tracks, err := m.providers.local.Tracks(name)
 	if err != nil {
 		m.status.Showf(statusTTLDefault, "Load failed: %s", err)
 		return
@@ -67,10 +67,10 @@ func (m *Model) plMgrEnterTrackList(name string) {
 
 // plMgrRefreshList reloads playlist names and counts from disk and clamps the cursor.
 func (m *Model) plMgrRefreshList() {
-	if m.localProvider == nil {
+	if m.providers.local == nil {
 		return
 	}
-	playlists, err := m.localProvider.Playlists()
+	playlists, err := m.providers.local.Playlists()
 	if err != nil {
 		m.status.Showf(statusTTLDefault, "Load failed: %s", err)
 	}

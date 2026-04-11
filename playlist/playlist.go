@@ -43,18 +43,17 @@ type Track struct {
 	Feed         bool // true for RSS/podcast feed URLs (resolved before playback)
 	DurationSecs int  // known duration in seconds (0 = unknown)
 	Favorite     bool // user-favorited track
-
-	// ProviderMeta holds provider-specific key-value pairs.
-	// Keys are namespaced by provider, e.g. "navidrome.id", "jellyfin.id".
-	ProviderMeta map[string]string
+	Artwork      ArtworkRef
+	Owner        TrackOwner
 }
 
-// Meta returns the value for a provider-specific metadata key, or "" if unset.
-func (t Track) Meta(key string) string {
-	if t.ProviderMeta == nil {
-		return ""
-	}
-	return t.ProviderMeta[key]
+type TrackOwner struct {
+	Provider string
+	ID       string
+}
+
+func (o TrackOwner) IsZero() bool {
+	return o.Provider == "" || o.ID == ""
 }
 
 // IsURL reports whether path is an HTTP or HTTPS URL, or a yt-dlp search protocol string.
@@ -62,6 +61,35 @@ func IsURL(path string) bool {
 	return strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") ||
 		strings.HasPrefix(path, "ytsearch:") || strings.HasPrefix(path, "ytsearch1:") ||
 		strings.HasPrefix(path, "scsearch:") || strings.HasPrefix(path, "scsearch1:")
+}
+
+// IsLocalFilePath reports whether path refers to a filesystem-backed local path.
+// It excludes HTTP/search URLs and other URI schemes such as ssh:// or spotify:.
+func IsLocalFilePath(path string) bool {
+	if path == "" || IsURL(path) {
+		return false
+	}
+	if looksLikeWindowsDrivePath(path) {
+		return true
+	}
+	if strings.Contains(path, "://") {
+		return false
+	}
+	return !strings.HasPrefix(path, "spotify:")
+}
+
+func looksLikeWindowsDrivePath(path string) bool {
+	if len(path) < 3 {
+		return false
+	}
+	drive := path[0]
+	if (drive < 'A' || drive > 'Z') && (drive < 'a' || drive > 'z') {
+		return false
+	}
+	if path[1] != ':' {
+		return false
+	}
+	return path[2] == '\\' || path[2] == '/'
 }
 
 // IsM3U reports whether the path points to an M3U playlist file (URL or local).
@@ -218,13 +246,16 @@ func TrackFromPath(path string) Track {
 	if IsURL(path) {
 		return trackFromURL(path)
 	}
-	return readTags(path)
+	if IsLocalFilePath(path) {
+		return readTags(path)
+	}
+	return TrackFromFilename(path)
 }
 
 // trackFromURL creates a Track from an HTTP/HTTPS URL, extracting a clean
 // display title from the URL path (ignoring query parameters).
 func trackFromURL(rawURL string) Track {
-	t := Track{Path: rawURL, Stream: true}
+	t := Track{Path: rawURL, Stream: true, Artwork: InferArtworkFromPath(rawURL)}
 
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -245,6 +276,34 @@ func trackFromURL(rawURL string) Track {
 	// Fallback: use hostname
 	t.Title = u.Hostname()
 	return t
+}
+
+func InferArtworkFromPath(path string) ArtworkRef {
+	if path == "" {
+		return NoArtwork()
+	}
+	if ref := inferYouTubeArtwork(path); !ref.IsNone() {
+		return ref
+	}
+	return NoArtwork()
+}
+
+func inferYouTubeArtwork(path string) ArtworkRef {
+	if !IsYouTubeURL(path) {
+		return NoArtwork()
+	}
+	u, err := url.Parse(path)
+	if err != nil {
+		return NoArtwork()
+	}
+	videoID := strings.TrimSpace(u.Query().Get("v"))
+	if videoID == "" {
+		videoID = strings.Trim(strings.TrimSpace(u.Path), "/")
+	}
+	if videoID == "" || strings.Contains(videoID, "/") {
+		return NoArtwork()
+	}
+	return RemoteArtwork("youtube:"+videoID, "https://i.ytimg.com/vi/"+videoID+"/hqdefault.jpg")
 }
 
 // IsLive reports whether the track is a live stream (e.g. Icecast radio)
