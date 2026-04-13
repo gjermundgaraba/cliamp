@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/lipgloss/v2"
-
 	"cliamp/lyrics"
 	"cliamp/theme"
 	"cliamp/ui"
@@ -62,82 +60,7 @@ func (m Model) renderDeviceOverlay() string {
 	return m.centerOverlay(strings.Join(lines, "\n"))
 }
 
-func (m Model) keymapHelpLine() string {
-	return helpKey("↑↓", "Navigate ") + helpKey("PgUp/Dn", "Page ") +
-		helpKey("Home/End", "Jump ") + helpKey("Type", "Filter ") + helpKey("Esc", "Close")
-}
 
-func (m Model) keymapVisibleRows() int {
-	probeSearch := dimStyle.Render("  Type to filter…")
-	if m.keymap.search != "" {
-		probeSearch = playlistSelectedStyle.Render("  / " + m.keymap.search + "_")
-	}
-
-	probeSections := []string{
-		titleStyle.Render("K E Y M A P"),
-		"",
-		probeSearch,
-		"",
-		"x", // list placeholder (1 row)
-		"",
-		dimStyle.Render("  0/0 keys"),
-		"",
-		m.keymapHelpLine(),
-	}
-
-	probeFrame := ui.FrameStyle.Render(strings.Join(probeSections, "\n"))
-	fixedHeight := lipgloss.Height(probeFrame) - 1
-
-	limit := maxPlVisible
-	if m.heightExpanded {
-		limit = m.height
-	}
-	return max(3, min(limit, m.height-fixedHeight))
-}
-
-func (m Model) renderKeymapOverlay() string {
-	lines := []string{
-		titleStyle.Render("K E Y M A P"),
-		"",
-	}
-
-	if m.keymap.search != "" {
-		lines = append(lines, playlistSelectedStyle.Render("  / "+m.keymap.search+"_"), "")
-	} else {
-		lines = append(lines, dimStyle.Render("  Type to filter…"), "")
-	}
-
-	entries := keymapEntries
-	var visible []keymapEntry
-	if m.keymap.search != "" {
-		for _, i := range m.keymap.filtered {
-			visible = append(visible, entries[i])
-		}
-	} else {
-		visible = entries
-	}
-
-	maxVisible := m.keymapVisibleRows()
-	rendered := 0
-
-	if len(visible) == 0 {
-		lines = append(lines, dimStyle.Render("  No matches"))
-		rendered = 1
-	} else {
-		scroll := scrollStart(m.keymap.cursor, maxVisible)
-		for i := scroll; i < len(visible) && i < scroll+maxVisible; i++ {
-			line := fmt.Sprintf("%-10s %s", visible[i].key, visible[i].action)
-			lines = append(lines, cursorLine(line, i == m.keymap.cursor))
-			rendered++
-		}
-	}
-
-	lines = padLines(lines, maxVisible, rendered)
-	lines = append(lines, "", dimStyle.Render(fmt.Sprintf("  %d/%d keys", len(visible), len(entries))))
-	lines = append(lines, "", m.keymapHelpLine())
-
-	return m.centerOverlay(strings.Join(lines, "\n"))
-}
 
 func (m Model) renderThemePicker() string {
 	lines := []string{
@@ -444,22 +367,13 @@ func (m Model) renderLyricsOverlay() string {
 			}
 		}
 
-		visible := m.height - 8
-		if visible < 5 {
-			visible = 5
-		}
+		visible := max(m.height-8, 5)
 		half := visible / 2
-		startIdx := activeIdx - half
-		if startIdx < 0 {
-			startIdx = 0
-		}
+		startIdx := max(activeIdx-half, 0)
 		endIdx := startIdx + visible
 		if endIdx > len(m.lyrics.lines) {
 			endIdx = len(m.lyrics.lines)
-			startIdx = endIdx - visible
-			if startIdx < 0 {
-				startIdx = 0
-			}
+			startIdx = max(endIdx-visible, 0)
 		}
 
 		for i := startIdx; i < endIdx; i++ {
@@ -475,14 +389,8 @@ func (m Model) renderLyricsOverlay() string {
 		}
 	} else {
 		// Scroll mode: manual navigation with j/k or arrow keys.
-		visible := m.height - 8
-		if visible < 5 {
-			visible = 5
-		}
-		endIdx := m.lyrics.scroll + visible
-		if endIdx > len(m.lyrics.lines) {
-			endIdx = len(m.lyrics.lines)
-		}
+		visible := max(m.height-8, 5)
+		endIdx := min(m.lyrics.scroll+visible, len(m.lyrics.lines))
 
 		for i := m.lyrics.scroll; i < endIdx; i++ {
 			text := m.lyrics.lines[i].Text

@@ -403,8 +403,7 @@ func (m *Model) handleNavTrackListKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.playlist.Queue(newIdx)
 			m.status.Showf(statusTTLMedium, "Queued: %s", t.DisplayName())
 			if !m.player.IsPlaying() {
-				m.playlist.Next()
-				cmd := m.playCurrentTrack()
+				cmd := m.nextTrack()
 				m.notifyPlayback()
 				return cmd
 			}
@@ -468,10 +467,7 @@ func navNextSort(s string, types []provider.SortType) string {
 
 // navMaybeAdjustScroll keeps navCursor visible within the rendered list window.
 func (m *Model) navMaybeAdjustScroll() {
-	visible := m.plVisible
-	if visible < 5 {
-		visible = 5
-	}
+	visible := max(m.plVisible, 5)
 	if m.providers.nav.cursor < m.providers.nav.scroll {
 		m.providers.nav.scroll = m.providers.nav.cursor
 	}

@@ -40,12 +40,13 @@ interfaces are defined in `provider/interfaces.go`.
 | `AlbumBrowser` | Paginated album browsing with sort | `AlbumList(sort, offset, size)`, `AlbumSortTypes()` |
 | `AlbumTrackLoader` | Album track listing | `AlbumTracks(albumID)` |
 | `ArtworkResolver` | Lazy artwork recovery for copied/saved tracks | `ResolveArtwork(ctx, track)` |
-| `Scrobbler` | Playback reporting | `Scrobble(track, submission)` |
+| `PlaybackReporter` | Now-playing + scrobble reporting | `CanReportPlayback(track)`, `ReportNowPlaying(track, position, canSeek)`, `ReportScrobble(track, elapsed, duration, canSeek)` |
 | `PlaylistWriter` | Add track to playlist | `AddTrackToPlaylist(ctx, playlistID, track)` |
 | `PlaylistCreator` | Create new playlist | `CreatePlaylist(ctx, name)` |
 | `PlaylistDeleter` | Remove playlists/tracks | `DeletePlaylist(name)`, `RemoveTrack(name, index)` |
 | `CustomStreamer` | Custom URI decode pipeline | `URISchemes()`, `NewStreamer(uri)` |
-| `FavoriteToggler` | Favorite toggling | `ToggleFavorite(id)` |
+| `FavoriteSetter` | Toggle favorites on saved playlist tracks | `SetFavorite(playlistName, idx)` |
+| `FavoriteToggler` | Toggle provider-native favorites | `ToggleFavorite(id)` |
 | `Closer` | Cleanup on shutdown | `Close()` |
 | `Authenticator` | Interactive sign-in flow | `Authenticate() error` (in `playlist` package) |
 
@@ -123,7 +124,7 @@ playlist.Track{
     Artist:  "Artist Name",
     Stream:  true,
     Artwork: playlist.RemoteArtwork("jellyfin:123", "https://my-server/Items/123/Images/Primary"),
-    Owner:   playlist.TrackOwner{Provider: "jellyfin", ID: "123"},
+    Owner:   playlist.TrackOwner{Provider: provider.KeyJellyfin, ID: "123"},
 }
 ```
 
@@ -192,7 +193,9 @@ implements, the UI will automatically:
 - Show the browse overlay ("N") if any registered provider implements `ArtistBrowser` or `AlbumBrowser`
 - Show the search overlay ("F") if any registered provider implements `Searcher`
 - Enable add-to-playlist in search results if the searched provider implements `PlaylistWriter`
-- Scrobble playback if `Scrobbler` is implemented
+- Report playback if `PlaybackReporter` is implemented
+- Toggle saved-playlist favorites if `FavoriteSetter` is implemented
+- Toggle provider-native favorites if `FavoriteToggler` is implemented
 - Run interactive auth on first use if `Authenticator` is implemented
 - Call `Close()` on shutdown if `Closer` is implemented
 

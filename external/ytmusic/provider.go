@@ -373,15 +373,10 @@ func (b *baseProvider) fetchDurations(ctx context.Context, svc *youtube.Service,
 	sem := make(chan struct{}, 5) // limit concurrent API calls
 
 	for i := 0; i < len(items); i += youtubeAPIBatchSize {
-		end := i + youtubeAPIBatchSize
-		if end > len(items) {
-			end = len(items)
-		}
+		end := min(i+youtubeAPIBatchSize, len(items))
 		batch := items[i:end]
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -401,7 +396,7 @@ func (b *baseProvider) fetchDurations(ctx context.Context, svc *youtube.Service,
 				durations[v.Id] = parseISO8601Duration(v.ContentDetails.Duration)
 			}
 			mu.Unlock()
-		}()
+		})
 	}
 
 	wg.Wait()

@@ -200,10 +200,7 @@ func (m Model) renderTitle() string {
 		return title
 	}
 	indicator := dimStyle.Render("[" + label + "]")
-	gap := ui.PanelWidth - lipgloss.Width(title) - lipgloss.Width(indicator)
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(ui.PanelWidth-lipgloss.Width(title)-lipgloss.Width(indicator), 1)
 	return title + strings.Repeat(" ", gap) + indicator
 }
 
@@ -293,10 +290,7 @@ func (m Model) renderTimeStatus() string {
 	}
 
 	left := timeStyle.Render(timeStr)
-	gap := ui.PanelWidth - lipgloss.Width(left) - lipgloss.Width(status)
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(ui.PanelWidth-lipgloss.Width(left)-lipgloss.Width(status), 1)
 
 	return left + strings.Repeat(" ", gap) + status
 }
@@ -597,9 +591,7 @@ func (m Model) renderProviderList() string {
 	}
 
 	// Clamp exactly to visible budget so footer/help remain visible.
-	if len(lines) > visibleBudget {
-		lines = lines[:visibleBudget]
-	}
+	lines = lines[:min(len(lines), visibleBudget)]
 	for len(lines) < visibleBudget {
 		lines = append(lines, "")
 	}
@@ -648,6 +640,14 @@ func (m Model) renderPlaylist() string {
 			style = playlistSelectedStyle
 		}
 
+		if tracks[i].Unplayable {
+			if m.focus == focusPlaylist && i == m.plCursor {
+				style = dimStyle
+			} else {
+				style = playlistUnavailableStyle
+			}
+		}
+
 		name := tracks[i].DisplayName()
 		isFav := tracks[i].Favorite
 		favBudget := 0
@@ -666,8 +666,13 @@ func (m Model) renderPlaylist() string {
 		name = truncate(name, ui.PanelWidth-linePrefixWidth-queueLen-favBudget)
 		// Truncate the album to fit whatever space remains after the track name.
 		albumSuffix := ""
-		if album := tracks[i].Album; album != "" {
-			nameLen := utf8.RuneCountInString(name)
+		nameLen := utf8.RuneCountInString(name)
+		if tracks[i].Unplayable {
+			remaining := ui.PanelWidth - linePrefixWidth - favBudget - nameLen - queueLen
+			if remaining >= 4 {
+				albumSuffix = truncate(" (unavailable)", remaining)
+			}
+		} else if album := tracks[i].Album; album != "" {
 			remaining := ui.PanelWidth - linePrefixWidth - favBudget - nameLen - queueLen - 3 // 3 = " · "
 			if remaining >= 4 {
 				albumSuffix = " · " + truncate(album, remaining)

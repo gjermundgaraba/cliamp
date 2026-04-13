@@ -1,6 +1,8 @@
 package playlist
 
-import "testing"
+import (
+	"testing"
+)
 
 // helper builds a playlist with n tracks named "A", "B", "C", ...
 func makePlaylist(n int, shuffle bool) *Playlist {
@@ -131,7 +133,7 @@ func TestMovePreservesPlaybackOrder_NoShuffle(t *testing.T) {
 	track, _ := p.Current()
 	playback = append(playback, track.Title) // A
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		track, ok := p.Next()
 		if !ok {
 			t.Fatalf("Next() returned false at step %d", i)
@@ -206,7 +208,7 @@ func TestAddShufflesNewTracksWhenShuffleEnabled(t *testing.T) {
 
 	start := p.Len()
 	var added []Track
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		added = append(added, Track{Title: string(rune('K' + i))})
 	}
 	p.Add(added...)
@@ -309,5 +311,291 @@ func TestMoveQueueBoundary(t *testing.T) {
 	}
 	if p.MoveQueue(0, 0) {
 		t.Error("MoveQueue(0, 0) should return false")
+	}
+}
+
+func TestNextPreservesCurrentOnUnplayableTail(t *testing.T) {
+	p := New()
+	p.Replace([]Track{
+		{Title: "A"},
+		{Title: "B", Unplayable: true},
+		{Title: "C", Unplayable: true},
+	})
+	p.SetIndex(0)
+
+	if _, ok := p.Next(); ok {
+		t.Fatal("Next() = true, want false")
+	}
+
+	track, idx := p.Current()
+	if track.Title != "A" || idx != 0 {
+		t.Fatalf("current = (%q,%d), want (\"A\",0)", track.Title, idx)
+	}
+}
+
+func TestPrevPreservesCurrentOnUnplayableHead(t *testing.T) {
+	p := New()
+	p.Replace([]Track{
+		{Title: "A", Unplayable: true},
+		{Title: "B", Unplayable: true},
+		{Title: "C"},
+	})
+	p.SetIndex(2)
+
+	if _, ok := p.Prev(); ok {
+		t.Fatal("Prev() = true, want false")
+	}
+
+	track, idx := p.Current()
+	if track.Title != "C" || idx != 2 {
+		t.Fatalf("current = (%q,%d), want (\"C\",2)", track.Title, idx)
+	}
+}
+
+func TestPeekNextMatchesNext(t *testing.T) {
+	p := New()
+	p.Replace([]Track{
+		{Title: "A"},
+		{Title: "B", Unplayable: true},
+		{Title: "C"},
+	})
+	p.SetIndex(0)
+	p.Queue(1)
+	p.Queue(2)
+
+	peek, ok := p.PeekNext()
+	if !ok {
+		t.Fatal("PeekNext() = false, want true")
+	}
+	if peek.Title != "C" {
+		t.Fatalf("peek = %q, want %q", peek.Title, "C")
+	}
+	cur, idx := p.Current()
+	if cur.Title != "A" || idx != 0 {
+		t.Fatalf("current after peek = (%q,%d), want (\"A\",0)", cur.Title, idx)
+	}
+	if p.QueueLen() != 2 {
+		t.Fatalf("QueueLen() after peek = %d, want 2", p.QueueLen())
+	}
+
+	next, ok := p.Next()
+	if !ok {
+		t.Fatal("Next() = false, want true")
+	}
+	if next.Title != peek.Title {
+		t.Fatalf("next = %q, want %q", next.Title, peek.Title)
+	}
+}
+
+func TestNextConsumesUnplayableQueuedItemsOnFailure(t *testing.T) {
+	p := New()
+	p.Replace([]Track{
+		{Title: "A"},
+		{Title: "B", Unplayable: true},
+	})
+	p.SetIndex(0)
+	p.Queue(1)
+
+	if _, ok := p.Next(); ok {
+		t.Fatal("Next() = true, want false")
+	}
+	cur, idx := p.Current()
+	if cur.Title != "A" || idx != 0 {
+		t.Fatalf("current = (%q,%d), want (\"A\",0)", cur.Title, idx)
+	}
+	if p.QueueLen() != 0 {
+		t.Fatalf("QueueLen() = %d, want 0", p.QueueLen())
+	}
+}
+
+func TestNextFailurePreservesQueuedCurrentTrack(t *testing.T) {
+	p := New()
+	p.Replace([]Track{
+		{Title: "A"},
+		{Title: "B"},
+	})
+	p.SetIndex(1)
+	p.Queue(0)
+
+	track, ok := p.Next()
+	if !ok || track.Title != "A" {
+		t.Fatalf("first Next() = (%q,%v), want (A,true)", track.Title, ok)
+	}
+
+	if _, ok := p.Next(); ok {
+		t.Fatal("second Next() = true, want false")
+	}
+	cur, idx := p.Current()
+	if cur.Title != "A" || idx != 0 {
+		t.Fatalf("current after failed Next() = (%q,%d), want (A,0)", cur.Title, idx)
+	}
+}
+
+func TestNextRepeatAllShuffleWrapSkipsCurrentTrack(t *testing.T) {
+	p := New()
+	p.shuffle = true
+	p.repeat = RepeatAll
+	p.Replace([]Track{
+		{Title: "A"},
+		{Title: "B"},
+		{Title: "C", Unplayable: true},
+	})
+	p.order = []int{1, 2, 0}
+	p.pos = 2
+
+	track, ok := p.Next()
+	if !ok {
+		t.Fatal("Next() = false, want true")
+	}
+	if track.Title != "B" {
+		t.Fatalf("next = %q, want %q", track.Title, "B")
+	}
+	if _, idx := p.Current(); idx != 1 {
+		t.Fatalf("current index = %d, want 1", idx)
+	}
+}
+
+func TestNextRepeatAllShuffleWrapFailureKeepsCurrentTrack(t *testing.T) {
+	p := New()
+	p.shuffle = true
+	p.repeat = RepeatAll
+	p.Replace([]Track{
+		{Title: "A", Unplayable: true},
+		{Title: "B", Unplayable: true},
+		{Title: "C", Unplayable: true},
+	})
+	p.pos = len(p.order) - 1
+
+	before, beforeIdx := p.Current()
+
+	if _, ok := p.Next(); ok {
+		t.Fatal("Next() = true, want false")
+	}
+
+	after, afterIdx := p.Current()
+	if after.Title != before.Title || afterIdx != beforeIdx {
+		t.Fatalf("current = (%q,%d), want (%q,%d)", after.Title, afterIdx, before.Title, beforeIdx)
+	}
+}
+
+func TestNextRepeatOneUnplayableCurrentReturnsFalse(t *testing.T) {
+	p := New()
+	p.repeat = RepeatOne
+	p.Replace([]Track{
+		{Title: "A", Unplayable: true},
+		{Title: "B"},
+		{Title: "C"},
+	})
+	p.SetIndex(0)
+
+	if _, ok := p.Next(); ok {
+		t.Fatal("Next() = true, want false")
+	}
+	if track, idx := p.Current(); track.Title != "A" || idx != 0 {
+		t.Fatalf("current = (%q,%d), want (\"A\",0)", track.Title, idx)
+	}
+}
+
+func TestActivateSelectedUsesSelectedOrderEvenWhenQueueChangesCurrent(t *testing.T) {
+	tests := []struct {
+		name           string
+		prepare        func(t *testing.T, p *Playlist)
+		wantQueueLen   int
+		wantQueueTrack int
+	}{
+		{
+			name: "pending queued track",
+			prepare: func(_ *testing.T, p *Playlist) {
+				p.Queue(0)
+			},
+			wantQueueLen:   1,
+			wantQueueTrack: 0,
+		},
+		{
+			name: "active queued current",
+			prepare: func(t *testing.T, p *Playlist) {
+				p.Queue(0)
+				if track, ok := p.Next(); !ok || track.Title != "Queued" {
+					t.Fatalf("Next() = (%q,%t), want (\"Queued\",true)", track.Title, ok)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := New()
+			p.Replace([]Track{
+				{Title: "Queued"},
+				{Title: "Missing", Unplayable: true},
+				{Title: "Replacement"},
+			})
+			p.SetIndex(1)
+			tt.prepare(t, p)
+
+			activation, ok := p.ActivateSelected()
+			if !ok {
+				t.Fatal("ActivateSelected() = false, want true")
+			}
+			if activation.Track.Title != "Replacement" || activation.Index != 2 || !activation.Skipped {
+				t.Fatalf("activation = (%q,%d,%t), want (\"Replacement\",2,true)", activation.Track.Title, activation.Index, activation.Skipped)
+			}
+			if current, idx := p.Current(); current.Title != "Replacement" || idx != 2 {
+				t.Fatalf("current = (%q,%d), want (\"Replacement\",2)", current.Title, idx)
+			}
+			if p.QueueLen() != tt.wantQueueLen {
+				t.Fatalf("QueueLen() = %d, want %d", p.QueueLen(), tt.wantQueueLen)
+			}
+			if tt.wantQueueLen > 0 && p.QueuePosition(tt.wantQueueTrack) != 1 {
+				t.Fatalf("QueuePosition(%d) = %d, want 1", tt.wantQueueTrack, p.QueuePosition(tt.wantQueueTrack))
+			}
+		})
+	}
+}
+
+func TestActivateSelectedWrapsWithRepeatAll(t *testing.T) {
+	p := New()
+	p.repeat = RepeatAll
+	p.Replace([]Track{
+		{Title: "A"},
+		{Title: "B"},
+		{Title: "C", Unplayable: true},
+	})
+	p.SetIndex(2)
+
+	activation, ok := p.ActivateSelected()
+	if !ok {
+		t.Fatal("ActivateSelected() = false, want true")
+	}
+	if activation.Track.Title != "A" || activation.Index != 0 || !activation.Skipped {
+		t.Fatalf("activation = (%q,%d,%t), want (\"A\",0,true)", activation.Track.Title, activation.Index, activation.Skipped)
+	}
+}
+
+func TestActivateSelectedFailureKeepsQueuedCurrentTrack(t *testing.T) {
+	p := New()
+	p.Replace([]Track{
+		{Title: "Queued"},
+		{Title: "Missing", Unplayable: true},
+		{Title: "Still Missing", Unplayable: true},
+	})
+	p.SetIndex(1)
+	p.Queue(0)
+	p.Queue(2)
+	if track, ok := p.Next(); !ok || track.Title != "Queued" {
+		t.Fatalf("Next() = (%q,%t), want (\"Queued\",true)", track.Title, ok)
+	}
+
+	if _, ok := p.ActivateSelected(); ok {
+		t.Fatal("ActivateSelected() = true, want false")
+	}
+	if current, idx := p.Current(); current.Title != "Queued" || idx != 0 {
+		t.Fatalf("current = (%q,%d), want (\"Queued\",0)", current.Title, idx)
+	}
+	if p.QueueLen() != 1 {
+		t.Fatalf("QueueLen() = %d, want 1", p.QueueLen())
+	}
+	if p.QueuePosition(2) != 1 {
+		t.Fatalf("QueuePosition(2) = %d, want 1", p.QueuePosition(2))
 	}
 }

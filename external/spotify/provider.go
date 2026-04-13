@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,10 +44,6 @@ const (
 	spotifyPlaylistPageSize = 50
 	spotifyTrackPageSize    = 100
 )
-
-// spotifyBitrate is the audio quality for Spotify streams (kbps).
-// TODO: make bitrate configurable via config.toml
-const spotifyBitrate = 320
 
 // spotifyPlaylistItem is the raw playlist object returned by /v1/me/playlists.
 type spotifyPlaylistItem struct {
@@ -85,6 +82,7 @@ type playlistCache struct {
 type SpotifyProvider struct {
 	session    *Session
 	clientID   string
+	bitrate    int
 	userID     string // Spotify user ID, fetched lazily on first Playlists() call
 	mu         sync.Mutex
 	trackCache map[string]*playlistCache // playlist ID → cache entry
@@ -99,10 +97,12 @@ const playlistListCacheTTL = 5 * time.Minute
 
 // New creates a SpotifyProvider. If session is nil, authentication is
 // deferred until the user first selects the Spotify provider.
-func New(session *Session, clientID string) *SpotifyProvider {
+// bitrate sets the preferred Spotify stream quality in kbps (96, 160, or 320).
+func New(session *Session, clientID string, bitrate int) *SpotifyProvider {
 	return &SpotifyProvider{
 		session:    session,
 		clientID:   clientID,
+		bitrate:    bitrate,
 		trackCache: make(map[string]*playlistCache),
 	}
 }
@@ -367,7 +367,7 @@ func (p *SpotifyProvider) Tracks(playlistID string) ([]playlist.Track, error) {
 			query := url.Values{
 				"limit":  {fmt.Sprintf("%d", limit)},
 				"offset": {fmt.Sprintf("%d", offset)},
-				"fields": {"items(item(id,name,artists(name),album(id,name,release_date,images(url)),duration_ms,track_number)),total"},
+				"fields": {"items(item(id,name,artists(name),album(id,name,release_date,images(url)),duration_ms,track_number,is_playable,restrictions(reason))),total"},
 			}
 			path := fmt.Sprintf("/v1/playlists/%s/items", playlistID)
 			resp, err = p.webAPI(ctx, "GET", path, query)
@@ -457,7 +457,7 @@ func (p *SpotifyProvider) NewStreamer(uri string) (beep.StreamSeekCloser, beep.F
 	tryStream := func() (*spotifyStreamer, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		stream, err := p.session.NewStream(ctx, *spotID, spotifyBitrate)
+		stream, err := p.session.NewStream(ctx, *spotID, p.bitrate)
 		if err != nil {
 			return nil, err
 		}
@@ -554,13 +554,7 @@ func (p *SpotifyProvider) webAPIWithBody(ctx context.Context, method, path strin
 			}
 		}
 
-		ok := false
-		for _, code := range acceptStatus {
-			if resp.StatusCode == code {
-				ok = true
-				break
-			}
-		}
+		ok := slices.Contains(acceptStatus, resp.StatusCode)
 		if !ok {
 			respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 512))
 			resp.Body.Close()
@@ -627,9 +621,13 @@ type spotifyTrackObj struct {
 	Artists []struct {
 		Name string `json:"name"`
 	} `json:"artists"`
-	Album       spotifyTrackAlbum `json:"album"`
-	DurationMs  int               `json:"duration_ms"`
-	TrackNumber int               `json:"track_number"`
+	Album        spotifyTrackAlbum `json:"album"`
+	DurationMs   int               `json:"duration_ms"`
+	TrackNumber  int               `json:"track_number"`
+	IsPlayable   *bool             `json:"is_playable"`
+	Restrictions struct {
+		Reason string `json:"reason"`
+	} `json:"restrictions"`
 }
 
 func spotifyTrackToPlaylistTrack(t *spotifyTrackObj) playlist.Track {
@@ -656,6 +654,7 @@ func spotifyTrackToPlaylistTrack(t *spotifyTrackObj) playlist.Track {
 		TrackNumber:  t.TrackNumber,
 		Artwork:      spotifyRemoteArtworkRef(t.Album.ID, spotifyAlbumArtworkURL(t.Album)),
 		Owner:        playlist.TrackOwner{Provider: provider.KeySpotify, ID: t.ID},
+		Unplayable:   (t.IsPlayable != nil && !*t.IsPlayable) || t.Restrictions.Reason != "",
 	}
 }
 

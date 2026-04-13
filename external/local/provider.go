@@ -313,7 +313,7 @@ func (p *Provider) loadTOML(path string) ([]playlist.Track, error) {
 		tracks = append(tracks, *track)
 	}
 
-	for _, rawLine := range strings.Split(string(data), "\n") {
+	for rawLine := range strings.SplitSeq(string(data), "\n") {
 		line := strings.TrimSpace(rawLine)
 
 		// Skip comments and blank lines.

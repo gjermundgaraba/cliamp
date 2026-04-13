@@ -72,7 +72,7 @@ func run(overrides config.Overrides, positional []string) error {
 
 	var spotifyProv *spotify.SpotifyProvider
 	if cfg.Spotify.IsSet() {
-		spotifyProv = spotify.New(nil, cfg.Spotify.ClientID)
+		spotifyProv = spotify.New(nil, cfg.Spotify.ClientID, cfg.Spotify.Bitrate)
 		providers = append(providers, provider.Entry{Key: provider.KeySpotify, Name: provider.DisplayName(provider.KeySpotify), Provider: spotifyProv})
 	}
 
@@ -305,7 +305,7 @@ func run(overrides config.Overrides, positional []string) error {
 		})
 	}
 
-	ipcSrv, ipcErr := ipc.NewServer(ipc.DefaultSocketPath(), ipc.DispatcherFunc(func(msg interface{}) { prog.Send(msg) }))
+	ipcSrv, ipcErr := ipc.NewServer(ipc.DefaultSocketPath(), ipc.DispatcherFunc(func(msg any) { prog.Send(msg) }))
 	if ipcErr != nil {
 		fmt.Fprintf(os.Stderr, "ipc: %v\n", ipcErr)
 	} else {

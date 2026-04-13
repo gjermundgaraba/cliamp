@@ -177,10 +177,7 @@ func (m Model) renderNavTrackList() []string {
 		return lines
 	}
 
-	maxVisible := m.plVisible
-	if maxVisible < 5 {
-		maxVisible = 5
-	}
+	maxVisible := max(m.plVisible, 5)
 
 	useFilter := len(m.providers.nav.searchIdx) > 0 || m.providers.nav.search != ""
 

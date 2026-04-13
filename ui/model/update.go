@@ -76,6 +76,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.fileBrowser.visible {
 			m.fbMaybeAdjustScroll(m.fbVisible())
 		}
+		if m.keymap.visible {
+			m.keymapMaybeAdjustScroll(m.keymapVisible())
+		}
 		return m, nil
 
 	case seekTickMsg:
@@ -211,7 +214,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fullDur := time.Duration(finishedTrack.DurationSecs) * time.Second
 			m.maybeScrobble(finishedTrack, fullDur, fullDur)
 
-			m.playlist.Next()
+			newTrack, ok := m.playlist.Next()
+			if !ok {
+				m.player.Stop()
+				m.notifyAll()
+				cmds = append(cmds, tickCmdAt(m.tickInterval()))
+				return m, tea.Batch(cmds...)
+			}
 			m.plCursor = m.playlist.Index()
 			m.adjustScroll()
 			m.titleOff = 0
@@ -223,12 +232,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// not a user-visible problem. Clear any pending error so the red
 			// message doesn't flash at every track transition.
 			m.err = nil
-			// Fire now-playing notification for the track the audio engine just
-			// started. playTrack() is not called on this path, so we must notify
-			// here explicitly.
-			if newTrack, idx := m.playlist.Current(); idx >= 0 {
-				m.nowPlaying(newTrack)
-			}
+			// Gapless advances without calling playTrack(), so emit now-playing here.
+			m.nowPlaying(newTrack)
 			if cmd := m.refreshCurrentArtwork(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
